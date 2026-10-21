@@ -173,7 +173,7 @@ Hệ thống in nhiệt mạng LAN theo chuẩn ESC/POS phục vụ in phiếu c
 
 ## 6. Xác thực PIN Quản lý & Nhật ký Kiểm toán (Phase 06)
 
-Hệ thống cung cấp cơ chế phê duyệt bằng mã PIN Quản lý cho các thao tác nhạy cảm và ghi nhận nhật ký kiểm toán không thể sửa đổi (`audit_logs`) theo quy chuẩn US-06, FR-10, BR-03, BR-04, NFR-03, ERR-02, ERR-03.
+Hệ thống cung cấp cơ chế phê duyệt bằng mã PIN Quản lý cho các thao tác nhạy cảm và ghi nhận nhật ký kiểm toán (`audit_logs`, chỉ ghi thêm qua ứng dụng; chưa có cơ chế chống sửa trực tiếp trong cơ sở dữ liệu) theo quy chuẩn US-06, FR-10, BR-03, BR-04, NFR-03, ERR-02, ERR-03.
 
 ### 6.1 Thao tác nhạy cảm yêu cầu phê duyệt Quản lý
 - **Hủy / Giảm số lượng món đã gửi bếp** (`POST /api/v1/orders/:id/items`): Yêu cầu mã PIN Quản lý và lý do hủy tối thiểu 5 ký tự. Khi được duyệt, hệ thống tự động phát sinh phiếu in hủy bếp `KOT_CANCEL` hiển thị tên người duyệt (`approverName`).
@@ -183,7 +183,7 @@ Hệ thống cung cấp cơ chế phê duyệt bằng mã PIN Quản lý cho cá
 
 ### 6.2 Chính sách bảo mật mã PIN & Khóa tài khoản
 - **Độ phức tạp mã PIN (`src/server/approvals/pin-policy.ts`)**:
-  - Mã PIN gồm đúng 4 chữ số (`^\d{4}$`).
+  - Mã PIN gồm từ 4 đến 6 chữ số (`^\d{4,6}$`).
   - Từ chối các mã PIN yếu hoặc dễ đoán: 4 chữ số trùng nhau (`1111`, `9999`), chuỗi tăng/giảm liên tiếp (`1234`, `4321`, `6789`), 2 cặp số lặp (`1212`, `6868`), và năm sinh phổ biến (1950 đến 2030).
   - Không cho phép trùng với mã PIN của Quản lý khác đang hoạt động trong hệ thống.
 - **Cơ chế khóa tài khoản tự động (Account Lockout)**:
