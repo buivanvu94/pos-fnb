@@ -34,9 +34,7 @@ export function getPool(): Pool {
     connectionTimeoutMillis: 5000,
   });
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForDb.posPool = createdPool;
-  }
+  globalForDb.posPool = createdPool;
 
   return createdPool;
 }
