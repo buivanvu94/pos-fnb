@@ -73,11 +73,20 @@ export function drawTwoColumn(
   options?: { bold?: boolean; fontSize?: number; fontColor?: string },
 ): void {
   ctx.save();
-  const size = options?.fontSize ?? 20;
+  const baseSize = options?.fontSize ?? (width <= 400 ? 16 : 18);
   const boldStr = options?.bold ? "bold " : "";
-  ctx.font = `${boldStr}${size}px sans-serif`;
+  ctx.font = `${boldStr}${baseSize}px sans-serif`;
   ctx.fillStyle = options?.fontColor ?? "#000000";
   ctx.textBaseline = "top";
+
+  const leftW = ctx.measureText(left).width;
+  const rightW = ctx.measureText(right).width;
+  const availableW = width - 20;
+
+  if (leftW + rightW + 8 > availableW) {
+    const scaledSize = Math.max(12, Math.floor(baseSize * (availableW / (leftW + rightW + 12))));
+    ctx.font = `${boldStr}${scaledSize}px sans-serif`;
+  }
 
   ctx.textAlign = "left";
   ctx.fillText(left, 10, y);

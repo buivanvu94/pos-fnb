@@ -10,16 +10,18 @@ import {
   drawQrCode,
   wrapText,
 } from "./canvas-helpers";
+import { layoutReceiptItems, drawReceiptItemRow } from "./receipt-item-layout";
 
 export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, width: number): Promise<Canvas> {
-  const baseHeight = 750 + payload.items.length * 60;
-  const canvas = createCanvas(width, baseHeight);
+  const estimatedHeight = Math.max(900, 750 + payload.items.length * 110);
+  const canvas = createCanvas(width, estimatedHeight);
   const ctx = canvas.getContext("2d");
 
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, baseHeight);
+  ctx.fillRect(0, 0, width, estimatedHeight);
+  ctx.textBaseline = "top";
 
-  let y = 20;
+  let y = 28;
 
   // Store Logo
   if (payload.storeLogoPath && fs.existsSync(payload.storeLogoPath)) {
@@ -41,8 +43,12 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
   ctx.textAlign = "center";
   if (payload.storeName) {
     ctx.font = "bold 24px sans-serif";
-    ctx.fillText(payload.storeName, width / 2, y);
-    y += 30;
+    const nameLines = wrapText(ctx, payload.storeName, width - 20);
+    for (const line of nameLines) {
+      ctx.fillText(line, width / 2, y);
+      y += 28;
+    }
+    y += 2;
   }
   if (payload.storeAddress) {
     ctx.font = "16px sans-serif";
@@ -58,18 +64,22 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
     y += 24;
   }
 
-  y += 10;
+  y += 8;
   ctx.font = "bold 26px sans-serif";
   ctx.fillText("HÓA ĐƠN THANH TOÁN", width / 2, y);
   y += 32;
 
   const orderLoc = payload.tableName || (payload.orderType === "MANG_VE" ? "Mang về" : "Tại bàn");
   ctx.font = "bold 22px sans-serif";
-  ctx.fillText(orderLoc, width / 2, y);
-  y += 32;
+  const locLines = wrapText(ctx, orderLoc, width - 20);
+  for (const line of locLines) {
+    ctx.fillText(line, width / 2, y);
+    y += 28;
+  }
+  y += 4;
 
   drawDashedLine(ctx, y, width);
-  y += 15;
+  y += 14;
 
   drawTwoColumn(ctx, "Số HD:", payload.orderCode, y, width, { fontSize: 17 });
   y += 24;
@@ -78,31 +88,29 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
   drawTwoColumn(ctx, "Thu ngân:", payload.cashierName, y, width, { fontSize: 17 });
   y += 26;
 
+  // Table Column Headers (spaced safely between lines)
   drawSolidLine(ctx, y, width, 1);
-  y += 12;
+  y += 10;
 
   ctx.font = "bold 17px sans-serif";
   ctx.textAlign = "left";
   ctx.fillText("Món / Đơn giá", 10, y);
   ctx.textAlign = "right";
   ctx.fillText("T.Tiền", width - 10, y);
-  y += 24;
+  y += 26;
+
   drawDashedLine(ctx, y, width);
-  y += 14;
+  y += 12;
 
-  for (const item of payload.items) {
-    ctx.font = "bold 18px sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(item.name, 10, y);
-    y += 22;
-
-    const subDetail = `${item.quantity} x ${formatVnd(item.unitPrice)}`;
-    drawTwoColumn(ctx, `  ${subDetail}`, formatVnd(item.totalPrice), y, width, { fontSize: 17 });
-    y += 24;
+  // Item rows with shared non-overlapping layout
+  const { rows, endY } = layoutReceiptItems(ctx, payload.items, y, width);
+  for (const row of rows) {
+    drawReceiptItemRow(ctx, row, width);
   }
+  y = endY;
 
   drawSolidLine(ctx, y, width, 1);
-  y += 16;
+  y += 14;
 
   drawTwoColumn(ctx, "Cộng tiền hàng:", formatVnd(payload.subtotal), y, width, { fontSize: 18 });
   y += 26;
@@ -113,13 +121,13 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
   }
 
   drawSolidLine(ctx, y, width, 2);
-  y += 16;
+  y += 14;
 
   drawTwoColumn(ctx, "KHÁCH PHẢI TRẢ:", formatVnd(payload.total), y, width, {
     bold: true,
     fontSize: 22,
   });
-  y += 34;
+  y += 32;
 
   const methodLabel = payload.paymentMethod === "VIETQR" ? "Chuyển khoản VietQR" : "Tiền mặt";
   drawTwoColumn(ctx, "Hình thức thanh toán:", methodLabel, y, width, { fontSize: 17 });
@@ -136,7 +144,7 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
   // Wi-Fi QR Code (DEC-13)
   if (payload.wifiSsid) {
     drawDashedLine(ctx, y, width);
-    y += 18;
+    y += 16;
 
     ctx.textAlign = "center";
     ctx.font = "bold 17px sans-serif";
@@ -160,14 +168,14 @@ export async function renderFinalReceiptCanvas(payload: FinalReceiptPayload, wid
   }
 
   drawDashedLine(ctx, y, width);
-  y += 20;
+  y += 18;
 
   ctx.textAlign = "center";
   ctx.font = "italic 16px sans-serif";
   ctx.fillText("Cảm ơn Quý khách & Hẹn gặp lại!", width / 2, y);
-  y += 30;
+  y += 28;
 
-  const finalCanvas = createCanvas(width, y);
+  const finalCanvas = createCanvas(width, y + 10);
   finalCanvas.getContext("2d").drawImage(canvas, 0, 0);
   return finalCanvas;
 }

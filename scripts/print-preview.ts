@@ -137,6 +137,94 @@ async function main() {
     storeName: "POS Cafe & Restaurant",
   };
 
+  // Requirement 5: Edge cases with very long item names, 12 items, large amounts (e.g. 1.234.567 d), long notes
+  const sampleEdgeCaseReceipt: FinalReceiptPayload = {
+    kind: "FINAL_RECEIPT",
+    orderId: 202,
+    orderCode: "HD-20261022-0099",
+    tableName: "Phòng VIP Hoàng Gia - Lầu 3",
+    cashierName: "Nguyễn Thị Thu Ngân Trưởng",
+    printedAt: "2026-10-22T21:45:00.000Z",
+    storeName: "Hệ Thống Nhà Hàng & Cà Phê Cao Cấp Sài Gòn Phố",
+    storeAddress: "Số 999 Đại Lộ Nguyễn Huệ, Phường Bến Nghé, Quận 1, Thành phố Hồ Chí Minh",
+    storePhone: "028.3822.9999 - 0909.888.777",
+    items: [
+      {
+        name: "Trà sữa Ô Long nướng trân châu hoàng kim đường đen đặc biệt thơm ngon hảo hạng size L",
+        quantity: 3,
+        unitPrice: 85000,
+        totalPrice: 255000,
+        toppings: ["Trân châu hoàng kim", "Pudding trứng", "Kem cheese béo ngậy"],
+        notes: "Ít đá 30%, 0% đường ngọt, đóng nắp màng bọc riêng mang về nhà",
+      },
+      {
+        name: "Combo Thuyền Sashimi Cá Hồi Nauy Tươi Sống Thượng Hạng Cùng Trứng Cá Tầm Đen",
+        quantity: 1,
+        unitPrice: 1234567,
+        totalPrice: 1234567,
+        notes: "Thêm nhiều wasabi tươi Nhật Bản và gừng hồng ngâm chua ngọt",
+      },
+      { name: "Cà phê đen truyền thống Robusta rang mộc thơm lừng", quantity: 2, unitPrice: 35000, totalPrice: 70000 },
+      { name: "Bạc xỉu ba tầng sữa tươi sương sáo thanh mát", quantity: 1, unitPrice: 42000, totalPrice: 42000 },
+      { name: "Trà đào cam sả hạt chia mật ong rừng tự nhiên", quantity: 2, unitPrice: 48000, totalPrice: 96000 },
+      { name: "Nước ép táo cần tây củ dền thanh lọc cơ thể", quantity: 1, unitPrice: 55000, totalPrice: 55000 },
+      { name: "Mì Ý bò bằm sốt cà chua truyền thống Ý phô mai", quantity: 2, unitPrice: 89000, totalPrice: 178000 },
+      { name: "Pizza hải sản sốt tiêu đen phô mai Mozzarella đút lò", quantity: 1, unitPrice: 185000, totalPrice: 185000 },
+      { name: "Cơm bò Fuji nướng sốt Teriyaki Nhật Bản trứng lòng đào", quantity: 2, unitPrice: 135000, totalPrice: 270000 },
+      { name: "Salad ức gà xông khói sốt mè rang dầu giấm Ý", quantity: 1, unitPrice: 79000, totalPrice: 79000 },
+      { name: "Khoai tây chiên giòn lắc phô mai rong biển", quantity: 2, unitPrice: 45000, totalPrice: 90000 },
+      {
+        name: "Rượu Vang Đỏ Cao Cấp Nhập Khẩu Bordeaux Grand Cru Classe Niên Vụ 2018",
+        quantity: 1,
+        unitPrice: 3500000,
+        totalPrice: 3500000,
+        notes: "Ướp lạnh sẵn 16 độ C trước khi phục vụ tại bàn",
+      },
+    ],
+    subtotal: 6054567,
+    discount: 500000,
+    total: 5554567,
+    paymentMethod: "VIETQR",
+    customerPaid: 5554567,
+    changeDue: 0,
+    wifiSsid: "SAIGON_PHO_VIP_5G",
+    wifiPassword: "saigonpho@welcome2026",
+    wifiSecurity: "WPA2",
+    kickDrawer: false,
+  };
+
+  const sampleEdgeCaseKot: KotPayload = {
+    kind: "KOT",
+    orderId: 202,
+    orderCode: "HD-20261022-0099",
+    tableName: "Phòng VIP Hoàng Gia - Lầu 3",
+    senderName: "Trần Văn Trưởng Ca Phục Vụ",
+    sentAt: "2026-10-22T21:40:00.000Z",
+    targetStation: "KITCHEN",
+    items: [
+      {
+        name: "Combo Thuyền Sashimi Cá Hồi Nauy Tươi Sống Thượng Hạng Cùng Trứng Cá Tầm Đen",
+        quantity: 2,
+        notes: "Trang trí đẹp mắt kiểu cung đình, thêm nhiều wasabi tươi và gừng hồng",
+        toppings: ["Wasabi tươi x2", "Gừng hồng thêm"],
+        unitPrice: 1234567,
+      },
+      {
+        name: "Bò Wagyu A5 áp chảo sốt nấm Truffle đen ăn kèm măng tây tươi",
+        quantity: 3,
+        notes: "Khách yêu cầu Medium Rare chín 5 phần, không ướp nhiều muối",
+        toppings: ["Nấm Truffle x2", "Măng tây thêm"],
+        unitPrice: 1850000,
+      },
+      {
+        name: "Lẩu tôm hùm Alaska chua cay đặc biệt niêu đất khổng lồ",
+        quantity: 1,
+        notes: "Rau nấm rửa kỹ, ớt để riêng cho khách tự nêm",
+        unitPrice: 2200000,
+      },
+    ],
+  };
+
   const templates: { name: string; payload: any }[] = [
     { name: "kot", payload: sampleKot },
     { name: "kot-cancel", payload: sampleKotCancel },
@@ -144,6 +232,9 @@ async function main() {
     { name: "final-receipt", payload: sampleFinalReceipt },
     { name: "cash-receipt", payload: sampleCashReceipt },
     { name: "z-report", payload: sampleZReport },
+    // Edge cases for coordinator visual review
+    { name: "edge-case-receipt", payload: sampleEdgeCaseReceipt },
+    { name: "edge-case-kot", payload: sampleEdgeCaseKot },
   ];
 
   console.log("=== RENDER PRINT PREVIEW (80mm & 58mm) ===");

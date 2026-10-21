@@ -10,21 +10,27 @@ import {
 } from "./canvas-helpers";
 
 export function renderCashReceiptCanvas(payload: CashReceiptPayload, width: number): Canvas {
-  const baseHeight = 450;
-  const canvas = createCanvas(width, baseHeight);
+  const estimatedHeight = 520;
+  const canvas = createCanvas(width, estimatedHeight);
   const ctx = canvas.getContext("2d");
 
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, width, baseHeight);
+  ctx.fillRect(0, 0, width, estimatedHeight);
+  ctx.textBaseline = "top";
 
-  let y = 20;
+  // Requirement 3 & 4: Top margin at least equal to font height (26px) so characters are never clipped
+  let y = 30;
 
   if (payload.storeName) {
     ctx.fillStyle = "#000000";
     ctx.textAlign = "center";
     ctx.font = "bold 22px sans-serif";
-    ctx.fillText(payload.storeName, width / 2, y);
-    y += 28;
+    const storeLines = wrapText(ctx, payload.storeName, width - 20);
+    for (const line of storeLines) {
+      ctx.fillText(line, width / 2, y);
+      y += 26;
+    }
+    y += 2;
   }
 
   const isThu = payload.entryType === "THU";
@@ -36,7 +42,7 @@ export function renderCashReceiptCanvas(payload: CashReceiptPayload, width: numb
   y += 34;
 
   drawDashedLine(ctx, y, width);
-  y += 15;
+  y += 14;
 
   drawTwoColumn(ctx, "Mã phiếu:", `#${payload.entryId}`, y, width, { fontSize: 17 });
   y += 24;
@@ -48,11 +54,11 @@ export function renderCashReceiptCanvas(payload: CashReceiptPayload, width: numb
   y += 28;
 
   drawSolidLine(ctx, y, width, 1);
-  y += 18;
+  y += 16;
 
   drawTwoColumn(ctx, "SỐ TIỀN:", formatVnd(payload.amount), y, width, {
     bold: true,
-    fontSize: 24,
+    fontSize: width <= 400 ? 20 : 24,
   });
   y += 36;
 
@@ -63,24 +69,24 @@ export function renderCashReceiptCanvas(payload: CashReceiptPayload, width: numb
     ctx.fillText(line, 10, y);
     y += 24;
   }
-  y += 15;
+  y += 14;
 
   drawSolidLine(ctx, y, width, 1);
-  y += 20;
+  y += 18;
 
   const half = width / 2;
   ctx.font = "bold 16px sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("Người lập phiếu", half / 2, y);
   ctx.fillText(isThu ? "Người nộp tiền" : "Người nhận tiền", half + half / 2, y);
-  y += 20;
+  y += 22;
 
   ctx.font = "italic 14px sans-serif";
   ctx.fillText("(Ký, ghi rõ họ tên)", half / 2, y);
   ctx.fillText("(Ký, ghi rõ họ tên)", half + half / 2, y);
-  y += 60;
+  y += 65;
 
-  const finalCanvas = createCanvas(width, y);
+  const finalCanvas = createCanvas(width, y + 10);
   finalCanvas.getContext("2d").drawImage(canvas, 0, 0);
   return finalCanvas;
 }
