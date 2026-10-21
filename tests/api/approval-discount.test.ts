@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -409,6 +409,78 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
     expect(addBody.data.totalAmount).toBe(100000);
     expect(addBody.data.discountAmount).toBe(10000); // 10% of 100,000
     expect(addBody.data.finalAmount).toBe(90000);
+  });
+
+  it("Item 3b: rejects discount when THU_NGAN uses 4-character reason with 400 Bad Request", async () => {
+    const { order } = await createTestOrder(100000);
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify({
+        amount: 10000,
+        lyDo: "1234", // Exactly 4 chars
+        pinCode: CORRECT_PIN,
+        expectedVersion: 1,
+      }),
+    });
+
+    const res = await discountHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("tối thiểu 5 ký tự");
+  });
+
+  it("Item 3c: never leaks PIN in response body, stdout, stderr, or console logs for valid or invalid PIN", async () => {
+    const logSpy = vi.spyOn(console, "log");
+    const errorSpy = vi.spyOn(console, "error");
+    const warnSpy = vi.spyOn(console, "warn");
+    const infoSpy = vi.spyOn(console, "info");
+
+    const { order } = await createTestOrder(100000);
+
+    // 1. Wrong PIN
+    const reqWrong = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
+      body: JSON.stringify({
+        amount: 10000,
+        pinCode: WRONG_PIN,
+        lyDo: "Thử sai mã PIN",
+        expectedVersion: 1,
+      }),
+    });
+    const resWrong = await discountHandler(reqWrong, { params: Promise.resolve({ id: String(order.id) }) });
+    const wrongText = await resWrong.text();
+    expect(wrongText).not.toContain(WRONG_PIN);
+
+    // 2. Correct PIN
+    const reqCorrect = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
+      body: JSON.stringify({
+        amount: 10000,
+        pinCode: CORRECT_PIN,
+        lyDo: "Giảm giá với mã PIN đúng",
+        expectedVersion: 1,
+      }),
+    });
+    const resCorrect = await discountHandler(reqCorrect, { params: Promise.resolve({ id: String(order.id) }) });
+    const correctText = await resCorrect.text();
+    expect(correctText).not.toContain(CORRECT_PIN);
+
+    for (const spy of [logSpy, errorSpy, warnSpy, infoSpy]) {
+      for (const call of spy.mock.calls) {
+        const str = JSON.stringify(call);
+        expect(str).not.toContain(CORRECT_PIN);
+        expect(str).not.toContain(WRONG_PIN);
+      }
+      spy.mockRestore();
+    }
   });
 });
 

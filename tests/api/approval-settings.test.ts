@@ -138,7 +138,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     expect(res.status).toBe(403);
   });
 
-  it("forbids disabling pinRequired in production environment (HTTP 403)", async () => {
+  it("forbids disabling pinRequired in production environment (HTTP 403), preserves value and does not write audit log", async () => {
     const originalEnv = process.env.NODE_ENV;
     try {
       (process.env as any).NODE_ENV = "production";
@@ -156,12 +156,44 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
       expect(res.status).toBe(403);
       const data = await res.json();
       expect(data.error).toContain("Không thể tắt yêu cầu mã PIN trong môi trường production");
+
+      // Verify value remains true (unchanged)
+      expect(await isPinRequired()).toBe(true);
+
+      // Verify NO SETTINGS_CHANGED audit log was written
+      const audits = await db
+        .select()
+        .from(schema.auditLogs)
+        .where(
+          and(
+            eq(schema.auditLogs.action, "SETTINGS_CHANGED"),
+            eq(schema.auditLogs.entityId, APPROVAL_PIN_REQUIRED_KEY),
+          ),
+        );
+      expect(audits.length).toBe(0);
+
+      // Verify required=true IS permitted in production
+      const reqTrue = new NextRequest("http://localhost:3000/api/v1/settings/approval", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+        },
+        body: JSON.stringify({ pinRequired: true }),
+      });
+      const resTrue = await updateSettingHandler(reqTrue);
+      expect(resTrue.status).toBe(200);
+      const dataTrue = await resTrue.json();
+      expect(dataTrue.ok).toBe(true);
+      expect(dataTrue.data.pinRequired).toBe(true);
     } finally {
       (process.env as any).NODE_ENV = originalEnv;
     }
   });
 
-  it("allows QUAN_LY to toggle pinRequired and writes SETTINGS_CHANGED audit log", async () => {
+  it("allows QUAN_LY to toggle pinRequired and writes SETTINGS_CHANGED audit log with previousValue and changedById", async () => {
+    await db.delete(schema.auditLogs).where(eq(schema.auditLogs.entityType, "settings"));
+
     const req = new NextRequest("http://localhost:3000/api/v1/settings/approval", {
       method: "PUT",
       headers: {
@@ -193,7 +225,9 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     expect(audit).toBeDefined();
     const meta = JSON.parse(audit.metadata!);
     expect(meta.key).toBe(APPROVAL_PIN_REQUIRED_KEY);
+    expect(meta.previousValue).toBe(true);
     expect(meta.newValue).toBe(false);
+    expect(meta.changedById).toBe(managerId);
   });
 
   it("when pinRequired is false, cashier applies discount without PIN (reason & audit still mandatory)", async () => {

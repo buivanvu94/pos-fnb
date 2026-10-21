@@ -224,6 +224,71 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
     await db.update(schema.users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(schema.users.id, managerId));
   });
 
+  it("rejects birth years 1950 and 2030, but allows boundary years 1949 and 2031", async () => {
+    // 1950 must be rejected
+    const req1950 = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
+      body: JSON.stringify({ currentPassword: CURRENT_PASSWORD, newPin: "1950" }),
+    });
+    const res1950 = await updatePinHandler(req1950);
+    expect(res1950.status).toBe(400);
+    expect((await res1950.json()).error).toContain("Không được sử dụng năm sinh");
+
+    // 2030 must be rejected
+    const req2030 = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
+      body: JSON.stringify({ currentPassword: CURRENT_PASSWORD, newPin: "2030" }),
+    });
+    const res2030 = await updatePinHandler(req2030);
+    expect(res2030.status).toBe(400);
+    expect((await res2030.json()).error).toContain("Không được sử dụng năm sinh");
+
+    // 1949 is allowed (outside 1950-2030)
+    const req1949 = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
+      body: JSON.stringify({ currentPassword: CURRENT_PASSWORD, newPin: "1949" }),
+    });
+    const res1949 = await updatePinHandler(req1949);
+    expect(res1949.status).toBe(200);
+
+    // 2031 is allowed (outside 1950-2030)
+    const req2031 = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
+      body: JSON.stringify({ currentPassword: CURRENT_PASSWORD, newPin: "2031" }),
+    });
+    const res2031 = await updatePinHandler(req2031);
+    expect(res2031.status).toBe(200);
+  });
+
+  it("rejects correct password when account is locked (429) and shares counter with login", async () => {
+    // Lock manager account
+    await db
+      .update(schema.users)
+      .set({
+        loginFailedCount: 5,
+        loginLockedUntil: new Date(Date.now() + 5 * 60 * 1000),
+      })
+      .where(eq(schema.users.id, managerId));
+
+    // Even with correct password, PIN change must return 429
+    const req = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
+      body: JSON.stringify({ currentPassword: CURRENT_PASSWORD, newPin: "8472" }),
+    });
+    const res = await updatePinHandler(req);
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error).toContain("Tài khoản đã bị tạm khóa do nhập sai mật khẩu quá 5 lần");
+
+    // Reset lock
+    await db.update(schema.users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(schema.users.id, managerId));
+  });
+
   it("blocks non-QUAN_LY roles from updating PIN with 403 Forbidden", async () => {
     const req = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
       method: "PUT",

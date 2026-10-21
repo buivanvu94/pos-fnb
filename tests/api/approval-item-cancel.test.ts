@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, and, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { POST as modifyOrderItemsHandler } from "@/app/api/v1/orders/[id]/items/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
@@ -438,6 +439,201 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.ok).toBe(true);
+    }
+  });
+
+  it("Item 2: returns HTTP 409 (not 500) when item is marked as printed to kitchen between precheck and transaction", async () => {
+    const { order } = await createTestOrder(50000);
+    const [item] = await db
+      .insert(schema.orderItems)
+      .values({
+        orderId: order.id,
+        menuItemId: kitchenItemId,
+        quantity: 1,
+        unitPrice: 50000,
+        isPrintedKitchen: false,
+      })
+      .returning();
+
+    const realDb = getDb();
+    const originalTx = realDb.transaction.bind(realDb);
+    const txSpy = vi.spyOn(realDb, "transaction").mockImplementationOnce(async (cb, config) => {
+      await db.update(schema.orderItems).set({ isPrintedKitchen: true }).where(eq(schema.orderItems.id, item.id));
+      return originalTx(cb, config);
+    });
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+      }),
+    });
+
+    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("Món đã được gửi bếp trong quá trình xử lý");
+    txSpy.mockRestore();
+  });
+
+  it("PHUC_VU role successfully cancels printed kitchen item with valid Manager PIN and reason >= 5 chars (SRS 2.5)", async () => {
+    const { order } = await createTestOrder(50000);
+    const [item] = await db
+      .insert(schema.orderItems)
+      .values({
+        orderId: order.id,
+        menuItemId: kitchenItemId,
+        quantity: 1,
+        unitPrice: 50000,
+        isPrintedKitchen: true,
+      })
+      .returning();
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
+      },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+        pinCode: CORRECT_PIN,
+        lyDo: "Phục vụ hủy món có PIN Quản lý duyệt",
+      }),
+    });
+
+    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+
+    const [updatedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
+    expect(updatedItem.isCancelled).toBe(true);
+
+    // Verify KOT_CANCEL enqueued with approverName
+    const printJobs = await db
+      .select()
+      .from(schema.printJobs)
+      .where(and(eq(schema.printJobs.orderId, order.id), eq(schema.printJobs.jobType, "KOT_KITCHEN")));
+    expect(printJobs.length).toBeGreaterThanOrEqual(1);
+    const latestJob = printJobs[printJobs.length - 1];
+    const payload = JSON.parse(latestJob.payload);
+    expect(payload.kind).toBe("KOT_CANCEL");
+    expect(payload.approverName).toBe("Quản Lý Test Hủy Món");
+
+    // Verify audit log has waiter as user and manager as approver
+    const [audit] = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.action, "CANCEL_ITEM"), eq(schema.auditLogs.entityId, String(item.id))));
+    expect(audit).toBeDefined();
+    expect(audit.userId).toBe(waiterId);
+    const meta = JSON.parse(audit.metadata!);
+    expect(meta.approverId).toBe(managerId);
+  });
+
+  it("PHUC_VU role fails to cancel printed kitchen item with wrong PIN (403 ERR-02) and data unchanged", async () => {
+    const { order } = await createTestOrder(50000);
+    const [item] = await db
+      .insert(schema.orderItems)
+      .values({
+        orderId: order.id,
+        menuItemId: kitchenItemId,
+        quantity: 1,
+        unitPrice: 50000,
+        isPrintedKitchen: true,
+      })
+      .returning();
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
+      },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+        pinCode: WRONG_PIN,
+        lyDo: "Phục vụ thử sai PIN hủy món",
+      }),
+    });
+
+    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe(ERROR_CATALOG.ERR_02.message);
+
+    const [unchangedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
+    expect(unchangedItem.isCancelled).toBe(false);
+  });
+
+  it("Item 3c: never leaks PIN in response body, stdout, stderr, or console logs for valid or invalid PIN", async () => {
+    const logSpy = vi.spyOn(console, "log");
+    const errorSpy = vi.spyOn(console, "error");
+    const warnSpy = vi.spyOn(console, "warn");
+    const infoSpy = vi.spyOn(console, "info");
+
+    const { order } = await createTestOrder(50000);
+    const [item] = await db
+      .insert(schema.orderItems)
+      .values({
+        orderId: order.id,
+        menuItemId: kitchenItemId,
+        quantity: 1,
+        unitPrice: 50000,
+        isPrintedKitchen: true,
+      })
+      .returning();
+
+    const reqWrong = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+        pinCode: WRONG_PIN,
+        lyDo: "Thử sai mã PIN bảo mật",
+      }),
+    });
+    const resWrong = await modifyOrderItemsHandler(reqWrong, { params: Promise.resolve({ id: String(order.id) }) });
+    const wrongText = await resWrong.text();
+    expect(wrongText).not.toContain(WRONG_PIN);
+
+    const reqCorrect = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+        pinCode: CORRECT_PIN,
+        lyDo: "Hủy món với mã PIN đúng",
+      }),
+    });
+    const resCorrect = await modifyOrderItemsHandler(reqCorrect, { params: Promise.resolve({ id: String(order.id) }) });
+    const correctText = await resCorrect.text();
+    expect(correctText).not.toContain(CORRECT_PIN);
+
+    for (const spy of [logSpy, errorSpy, warnSpy, infoSpy]) {
+      for (const call of spy.mock.calls) {
+        const str = JSON.stringify(call);
+        expect(str).not.toContain(CORRECT_PIN);
+        expect(str).not.toContain(WRONG_PIN);
+      }
+      spy.mockRestore();
     }
   });
 });

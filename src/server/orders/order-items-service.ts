@@ -16,10 +16,7 @@ import type { ActingUser } from "@/server/approvals/approval-types";
 
 export { sendKitchenOrder } from "./send-kitchen-service";
 export { deleteEmptyOrder } from "./delete-order-service";
-
-export type ModifyResult =
-  | { ok: true; order: OrderDetail }
-  | { ok: false; error: string; status: number };
+export type ModifyResult = { ok: true; order: OrderDetail } | { ok: false; error: string; status: number };
 
 export async function modifyOrderItems(
   orderId: number,
@@ -29,12 +26,9 @@ export async function modifyOrderItems(
   userAgent?: string | null,
 ): Promise<ModifyResult> {
   const approval = await precheckItemApproval(orderId, input, actingUser, clientIp, userAgent);
-  if (approval && !approval.ok) {
-    return { ok: false, error: approval.error, status: approval.status };
-  }
+  if (approval && !approval.ok) return { ok: false, error: approval.error, status: approval.status };
 
   const enqueuedJobIds: number[] = [];
-
   try {
     const res = await db.transaction(async (tx) => {
       const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
@@ -46,47 +40,34 @@ export async function modifyOrderItems(
 
       if (input.action === "delete") {
         if (!input.orderItemId) throw new TxAbortError("Thiếu mã dòng món cần xóa", 400);
-        const [item] = await tx
-          .select()
-          .from(orderItems)
-          .where(and(eq(orderItems.id, input.orderItemId), eq(orderItems.orderId, orderId)))
-          .limit(1);
+        const [item] = await tx.select().from(orderItems)
+          .where(and(eq(orderItems.id, input.orderItemId), eq(orderItems.orderId, orderId))).limit(1);
         if (!item) throw new TxAbortError("Dòng món không tồn tại trong đơn hàng", 404);
         if (item.isCancelled) throw new TxAbortError("Dòng món đã bị hủy, không thể chỉnh sửa hoặc xóa", 409);
 
         if (item.isPrintedKitchen) {
+          if (!approval?.ok) {
+            throw new TxAbortError("Món đã được gửi bếp trong quá trình xử lý. Vui lòng liên hệ Quản lý để duyệt hủy!", 409);
+          }
           await handleCancelPrintedItem({
-            tx,
-            order,
-            item,
-            quantityToCancel: item.quantity,
-            approval: approval as any,
-            actingUser: actingUser!,
-            clientIp,
-            userAgent,
-            enqueuedJobIds,
+            tx, order, item, quantityToCancel: item.quantity,
+            approval, actingUser: actingUser!, clientIp, userAgent, enqueuedJobIds,
           });
         } else {
           await tx.delete(orderItems).where(eq(orderItems.id, input.orderItemId));
           await logAudit({
-            userId: actingUser?.userId ?? actingUser?.id ?? null,
-            username: actingUser?.username,
-            userAgent,
-            action: "REMOVE_UNSENT_ITEM",
-            entityType: "order_items",
-            entityId: item.id,
-            reason: "Xóa món chưa gửi bếp khỏi đơn hàng",
-            metadata: { orderId, menuItemId: item.menuItemId, quantity: item.quantity },
+            userId: actingUser?.userId ?? actingUser?.id ?? null, username: actingUser?.username, userAgent,
+            action: "REMOVE_UNSENT_ITEM", entityType: "order_items", entityId: item.id,
+            reason: "Xóa món chưa gửi bếp khỏi đơn hàng", metadata: { orderId, menuItemId: item.menuItemId, quantity: item.quantity },
             ipAddress: clientIp,
           }, tx);
         }
       } else {
-        const itemsToProcess =
-          input.items && input.items.length > 0
-            ? input.items
-            : input.orderItemId !== undefined || input.menuItemId !== undefined
-              ? [{ id: input.orderItemId, menuItemId: input.menuItemId, quantity: input.quantity ?? 1, notes: input.notes, toppingIds: input.toppingIds ?? [] }]
-              : [];
+        const itemsToProcess = input.items && input.items.length > 0
+          ? input.items
+          : input.orderItemId !== undefined || input.menuItemId !== undefined
+            ? [{ id: input.orderItemId, menuItemId: input.menuItemId, quantity: input.quantity ?? 1, notes: input.notes, toppingIds: input.toppingIds ?? [] }]
+            : [];
         if (itemsToProcess.length === 0) throw new TxAbortError("Thiếu thông tin món cần thêm hoặc cập nhật", 400);
 
         for (const item of itemsToProcess) {
@@ -97,16 +78,12 @@ export async function modifyOrderItems(
 
             if (existing.isPrintedKitchen) {
               if (item.quantity < existing.quantity) {
+                if (!approval?.ok) {
+                  throw new TxAbortError("Món đã được gửi bếp trong quá trình xử lý. Vui lòng liên hệ Quản lý để duyệt hủy!", 409);
+                }
                 await handleCancelPrintedItem({
-                  tx,
-                  order,
-                  item: existing,
-                  quantityToCancel: existing.quantity - item.quantity,
-                  approval: approval as any,
-                  actingUser: actingUser!,
-                  clientIp,
-                  userAgent,
-                  enqueuedJobIds,
+                  tx, order, item: existing, quantityToCancel: existing.quantity - item.quantity,
+                  approval, actingUser: actingUser!, clientIp, userAgent, enqueuedJobIds,
                 });
               } else {
                 throw new TxAbortError("Không thể sửa hoặc xóa món đã gửi bếp. Vui lòng liên hệ Quản lý để hủy món!", 409);
@@ -119,25 +96,21 @@ export async function modifyOrderItems(
               if (item.quantity <= 0) {
                 await tx.delete(orderItems).where(eq(orderItems.id, item.id));
                 await logAudit({
-                  userId: actingUser?.userId ?? actingUser?.id ?? null,
-                  username: actingUser?.username,
-                  userAgent,
-                  action: "REMOVE_UNSENT_ITEM",
-                  entityType: "order_items",
-                  entityId: item.id,
-                  reason: "Giảm số lượng về 0 (xóa món chưa gửi bếp)",
-                  metadata: { orderId, menuItemId: existing.menuItemId, previousQuantity: existing.quantity },
+                  userId: actingUser?.userId ?? actingUser?.id ?? null, username: actingUser?.username, userAgent,
+                  action: "REMOVE_UNSENT_ITEM", entityType: "order_items", entityId: item.id,
+                  reason: "Giảm số lượng về 0 (xóa món chưa gửi bếp)", metadata: { orderId, menuItemId: existing.menuItemId, previousQuantity: existing.quantity },
                   ipAddress: clientIp,
                 }, tx);
               } else {
-                const nextNotes = item.notes !== undefined ? (item.notes === null || item.notes.trim() === "" ? null : item.notes.trim().slice(0, 100)) : existing.notes;
-                await tx.update(orderItems).set({ quantity: item.quantity, notes: nextNotes }).where(eq(orderItems.id, item.id));
+                await tx.update(orderItems).set({
+                  quantity: item.quantity,
+                  notes: item.notes !== undefined ? (item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null) : existing.notes,
+                }).where(eq(orderItems.id, item.id));
               }
             }
-          } else {
-            if (!item.menuItemId) throw new TxAbortError("Mã món không hợp lệ", 400);
+          } else if (item.menuItemId) {
             const [menuItem] = await tx.select().from(menuItems).where(eq(menuItems.id, item.menuItemId)).limit(1);
-            if (!menuItem) throw new TxAbortError("Món ăn không tồn tại trong thực đơn", 400);
+            if (!menuItem) throw new TxAbortError("Món không tồn tại", 404);
             if (menuItem.status === "HET_HANG") throw new TxAbortError(formatErr07(menuItem.name), 400);
 
             const uniqueToppingIds = Array.from(new Set(item.toppingIds ?? []));
@@ -149,12 +122,8 @@ export async function modifyOrderItems(
             }
 
             const [newItem] = await tx.insert(orderItems).values({
-              orderId,
-              menuItemId: menuItem.id,
-              quantity: item.quantity > 0 ? item.quantity : 1,
-              unitPrice: menuItem.price,
-              notes: item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null,
-              isPrintedKitchen: false,
+              orderId, menuItemId: menuItem.id, quantity: item.quantity > 0 ? item.quantity : 1, unitPrice: menuItem.price,
+              notes: item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null, isPrintedKitchen: false,
             }).returning();
 
             for (const t of toppingRecords) {
@@ -168,19 +137,11 @@ export async function modifyOrderItems(
       if (calculatedTotal > MAX_ORDER_AMOUNT) throw new TxAbortError("Tổng tiền đơn hàng vượt quá giới hạn 2.000.000.000 VNĐ", 400);
 
       const { discountAmount, finalAmount } = await recalculateOrderDiscount(
-        orderId,
-        calculatedTotal,
-        order.discountAmount,
-        order.discountPercent,
-        tx,
+        orderId, calculatedTotal, order.discountAmount, order.discountPercent, tx,
       );
 
       await tx.update(orders).set({
-        totalAmount: calculatedTotal,
-        discountAmount,
-        finalAmount,
-        version: order.version + 1,
-        updatedAt: new Date(),
+        totalAmount: calculatedTotal, discountAmount, finalAmount, version: order.version + 1, updatedAt: new Date(),
       }).where(eq(orders.id, orderId));
 
       if (order.tableId) {

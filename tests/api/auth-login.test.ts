@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import bcrypt from "bcryptjs";
 import { eq, and } from "drizzle-orm";
@@ -162,6 +162,30 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
     expect(unlockedUser.loginLockedUntil).toBeNull();
   });
 
+  it("resets failed count to 1 when a wrong password attempt occurs after lockout expired", async () => {
+    // Set user as previously locked, but lockout time is 1 second in the past
+    await db
+      .update(users)
+      .set({
+        loginFailedCount: 5,
+        loginLockedUntil: new Date(Date.now() - 1000),
+      })
+      .where(eq(users.id, lockTestUserId));
+
+    const req = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: lockTestUsername, password: "wrong_password_after_expiry" }),
+    });
+
+    const res = await loginHandler(req);
+    expect(res.status).toBe(401);
+
+    const [user] = await db.select().from(users).where(eq(users.id, lockTestUserId));
+    expect(user.loginFailedCount).toBe(1); // restarts from 1!
+    expect(user.loginLockedUntil).toBeNull();
+  });
+
   it("serializes 10 concurrent wrong password attempts and locks at exactly threshold 5", async () => {
     // Reset counter
     await db.update(users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(users.id, lockTestUserId));
@@ -213,6 +237,61 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
     expect(nonExistRes.status).toBe(401);
     expect(wrongPassData).toEqual(nonExistData);
     expect(nonExistData.error).toBe("Tên đăng nhập hoặc mật khẩu không chính xác");
+  });
+
+  it("executes dummy bcrypt compare for non-existent username to mitigate timing attacks", async () => {
+    const bcryptSpy = vi.spyOn(bcrypt, "compare");
+    const nonExistReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: `nonexistent_${rand()}`, password: "some_secret_password" }),
+    });
+
+    const res = await loginHandler(nonExistReq);
+    expect(res.status).toBe(401);
+
+    expect(bcryptSpy).toHaveBeenCalledWith("some_secret_password", expect.stringContaining("$2a$10$"));
+    bcryptSpy.mockRestore();
+  });
+
+  it("handles 12 concurrent wrong logins for non-existent users without connection pool exhaustion", async () => {
+    const requests = Array.from({ length: 12 }).map((_, idx) =>
+      loginHandler(
+        new NextRequest("http://localhost:3000/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: `ghost_user_${tag}_${idx}`, password: "dummy_pass_pool_check" }),
+        }),
+      ),
+    );
+
+    const results = await Promise.all(requests);
+    for (const res of results) {
+      expect(res.status).toBe(401);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+    }
+  });
+
+  it("writes LOGIN_FAILED and LOGIN_LOCKED audit logs without leaking plaintext passwords in metadata", async () => {
+    const failedLogs = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityId, String(lockTestUserId)), eq(auditLogs.action, "LOGIN_FAILED")));
+    expect(failedLogs.length).toBeGreaterThan(0);
+
+    const lockedLogs = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityId, String(lockTestUserId)), eq(auditLogs.action, "LOGIN_LOCKED")));
+    expect(lockedLogs.length).toBeGreaterThan(0);
+
+    for (const log of [...failedLogs, ...lockedLogs]) {
+      const metaStr = log.metadata || "";
+      expect(metaStr).not.toContain(lockTestPassword);
+      expect(metaStr).not.toContain("wrong");
+      expect(metaStr).not.toContain("concurrent_wrong");
+    }
   });
 
   it("returns 400 when missing username or password", async () => {

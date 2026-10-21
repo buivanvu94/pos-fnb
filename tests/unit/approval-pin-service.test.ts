@@ -162,6 +162,45 @@ describe("Approval PIN Service - Unit Tests (FR-10, BR-04, ERR-02, ERR-03)", () 
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, waiterId));
     expect(user.pinLockedUntil).not.toBeNull();
   });
+
+  it("selects manager with smallest ID (ORDER BY id ASC) when multiple managers match PIN", async () => {
+    const pinHashShared = await bcrypt.hash("5391", 10);
+    const [mgr1] = await db
+      .insert(schema.users)
+      .values({
+        username: `mgr_shared_1_${tag}`,
+        fullName: "Quản Lý 1",
+        role: "QUAN_LY",
+        passwordHash: "dummy",
+        pinHash: pinHashShared,
+      })
+      .returning();
+
+    const [mgr2] = await db
+      .insert(schema.users)
+      .values({
+        username: `mgr_shared_2_${tag}`,
+        fullName: "Quản Lý 2",
+        role: "QUAN_LY",
+        passwordHash: "dummy",
+        pinHash: pinHashShared,
+      })
+      .returning();
+
+    expect(mgr1.id).toBeLessThan(mgr2.id);
+
+    await db.update(schema.users).set({ pinFailedCount: 0, pinLockedUntil: null }).where(eq(schema.users.id, waiterId));
+
+    const result = await verifyManagerPin(waiterId, "5391");
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.approver.id).toBe(mgr1.id);
+      expect(result.approver.fullName).toBe("Quản Lý 1");
+    }
+
+    await db.delete(schema.users).where(eq(schema.users.id, mgr1.id));
+    await db.delete(schema.users).where(eq(schema.users.id, mgr2.id));
+  });
 });
 
 

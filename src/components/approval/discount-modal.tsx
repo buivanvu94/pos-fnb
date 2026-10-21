@@ -131,6 +131,7 @@ export function DiscountModal({
               <InputNumber
                 min={0}
                 max={100}
+                precision={0}
                 style={{ width: "100%" }}
                 value={percentValue}
                 onChange={(val) => setPercentValue(val)}
