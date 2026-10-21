@@ -23,6 +23,7 @@ export const orders = pgTable(
       .references(() => shifts.id, { onDelete: "restrict" }),
     totalAmount: integer("total_amount").notNull().default(0), // TongTien VND
     discountAmount: integer("discount_amount").notNull().default(0), // GiamGia VND
+    discountPercent: integer("discount_percent"), // GiamGia % (0..100)
     finalAmount: integer("final_amount").notNull().default(0), // KhachCanTra VND
     paymentMethod: varchar("payment_method", { length: 20 }), // TIEN_MAT | VIETQR
     status: varchar("status", { length: 20 }).notNull().default("DANG_PHUC_VU"), // DANG_PHUC_VU | DA_THANH_TOAN | DA_HUY | DA_GOP
@@ -41,6 +42,7 @@ export const orders = pgTable(
     check("orders_status_check", sql`${table.status} IN ('DANG_PHUC_VU', 'DA_THANH_TOAN', 'DA_HUY', 'DA_GOP')`),
     check("orders_total_amount_check", sql`${table.totalAmount} >= 0`),
     check("orders_discount_amount_check", sql`${table.discountAmount} >= 0`),
+    check("orders_discount_percent_check", sql`${table.discountPercent} IS NULL OR (${table.discountPercent} >= 0 AND ${table.discountPercent} <= 100)`),
     check("orders_final_amount_check", sql`${table.finalAmount} >= 0`),
   ],
 );

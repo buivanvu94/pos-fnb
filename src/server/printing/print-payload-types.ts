@@ -30,6 +30,7 @@ export interface KotCancelPayload {
   orderCode: string;
   tableName: string;
   cancelledByName: string;
+  approverName?: string;
   cancelledAt: string;
   reason: string;
   targetStation: "KITCHEN" | "BAR";
@@ -132,3 +133,4 @@ export type PrintPayload =
   | FinalReceiptPayload
   | CashReceiptPayload
   | ZReportPayload;
+

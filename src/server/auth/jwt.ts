@@ -2,6 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { z } from "zod";
 
 export const AUTH_COOKIE_NAME = "pos_token";
+export const AUTH_COOKIE_MAX_AGE = 60 * 60 * 12; // 12 hours (single shift duration)
 
 export const TokenPayloadSchema = z.object({
   userId: z.number().int().positive(),
@@ -60,14 +61,14 @@ export function isCookieSecure(): boolean {
 }
 
 /**
- * Signs a JWT token containing user details with a 7-day expiration.
+ * Signs a JWT token containing user details with a 12-hour expiration (single shift duration).
  */
 export async function signAuthToken(payload: TokenPayload): Promise<string> {
   const key = getSecretKey();
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime("12h")
     .sign(key);
 }
 

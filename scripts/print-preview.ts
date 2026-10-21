@@ -44,7 +44,8 @@ async function main() {
     orderId: 101,
     orderCode: "HD-20261022-0042",
     tableName: "Bàn 04 - Tầng 1",
-    cancelledByName: "Trần Quản Lý",
+    cancelledByName: "Nguyễn Thu Ngân",
+    approverName: "Trần Quản Lý",
     cancelledAt: "2026-10-22T08:45:00.000Z",
     reason: "Khách đổi sang cơm rang dưa bò",
     targetStation: "KITCHEN",
@@ -257,3 +258,4 @@ main().catch((err) => {
   console.error("Preview generation failed:", err);
   process.exit(1);
 });
+

@@ -19,7 +19,7 @@ Hệ thống POS bán hàng F&B chuyên nghiệp cho quán ăn, cafe chạy trê
 > Ứng dụng POS sử dụng cookie `pos_token` gắn cờ `httpOnly` và `sameSite: "lax"` thay vì truyền Bearer token trong tiêu đề HTTP (như ghi chú ban đầu tại `ba/09-api.md`). Đây là quyết định kiến trúc có chủ đích dành cho Web App cùng origin (Same-Origin Web POS), giúp chống rò rỉ token qua tấn công XSS, tự động đính kèm phiên làm việc an toàn và tối ưu trải nghiệm chạm trên màn hình cảm ứng.
 >
 > **Thời hạn hiệu lực Token & Đánh đổi bảo mật (Stateless JWT)**:
-> Phiên đăng nhập có thời hạn 7 ngày và được xác thực hoàn toàn không trạng thái (stateless) qua giải thuật mã hóa HS256 mà không truy vấn cơ sở dữ liệu trên mỗi HTTP request. Sự đánh đổi này đem lại hiệu năng phản hồi cực nhanh cho quầy thu ngân và order tại bàn trong giờ cao điểm. Trong trường hợp cần thu hồi quyền ngay lập tức khi tài khoản nhân viên bị khóa, Phase 02+ có thể bổ sung cơ chế kiểm tra `token_version` hoặc danh sách đen (Redis/cache blacklist).
+> Phiên đăng nhập có thời hạn 12 giờ và được xác thực hoàn toàn không trạng thái (stateless) qua giải thuật mã hóa HS256 mà không truy vấn cơ sở dữ liệu trên mỗi HTTP request. Sự đánh đổi này đem lại hiệu năng phản hồi cực nhanh cho quầy thu ngân và order tại bàn trong giờ cao điểm. Trong trường hợp cần thu hồi quyền ngay lập tức khi tài khoản nhân viên bị khóa, Phase 02+ có thể bổ sung cơ chế kiểm tra `token_version` hoặc danh sách đen (Redis/cache blacklist).
 
 ## 2. Thiết lập môi trường & Chạy dự án
 
@@ -40,6 +40,7 @@ cp .env.example .env
 Các cấu hình quan trọng:
 - `JWT_SECRET`: Chuỗi khóa ký bảo mật tối thiểu 32 ký tự (bắt buộc trong production).
 - `COOKIE_SECURE`: Đặt `true` nếu chạy qua HTTPS; đặt `false` nếu triển khai mạng nội bộ quán (LAN HTTP).
+- `TRUST_PROXY`: Đặt `true` nếu triển khai sau reverse proxy tin cậy (Nginx/Traefik); mặc định `false` để ngăn chặn giả mạo IP client qua tiêu đề `X-Forwarded-For`.
 
 ### Migration và Seed dữ liệu mẫu
 ```bash
@@ -121,8 +122,8 @@ scripts/                  # Scripts tiện ích (seed-menu)
   - Khác biệt so với ghi chú ban đầu tại `ba/09-api.md` (truyền Bearer token qua header `Authorization`), đây là quyết định kiến trúc có chủ đích dành cho ứng dụng Same-Origin Web POS.
   - Lợi ích: Chống triệt để việc đánh cắp token qua tấn công XSS từ client scripts, tự động đính kèm thông tin phiên an toàn trên trình duyệt và tối ưu thao tác cảm ứng trên máy POS.
 
-- **Thời hạn hiệu lực Token & Đánh đổi Stateless JWT (7-Day Validity)**:
-  - Token JWT có hạn 7 ngày, xác thực phi trạng thái bằng HS256 thông qua Next.js Middleware mà không query database trên từng request, bảo đảm độ trễ phản hồi thấp nhất cho quầy thu ngân.
+- **Thời hạn hiệu lực Token & Đánh đổi Stateless JWT (12-Hour Validity)**:
+  - Token JWT có hạn 12 giờ, xác thực phi trạng thái bằng HS256 thông qua Next.js Middleware mà không query database trên từng request, bảo đảm độ trễ phản hồi thấp nhất cho quầy thu ngân.
   - **Đánh đổi bảo mật**: Việc thay đổi vai trò (role) hoặc vô hiệu hóa tài khoản nhân viên trong database chỉ có hiệu lực triệt để khi phiên làm việc hiện tại hết hạn hoặc người dùng đăng xuất.
   - **Mở rộng tương lai (Phase 02+)**: Nếu cần cơ chế thu hồi quyền ngay lập tức (immediate revocation), hệ thống có thể bổ sung trường `token_version` so khớp phiên hoặc quản lý danh sách đen (token blacklist) qua Redis/in-memory cache.
 
@@ -168,3 +169,30 @@ Hệ thống in nhiệt mạng LAN theo chuẩn ESC/POS phục vụ in phiếu c
   npm run print:test -- 192.168.1.200 kitchen
   npm run print:test -- 192.168.1.202 receipt
   ```
+
+
+## 6. Xác thực PIN Quản lý & Nhật ký Kiểm toán (Phase 06)
+
+Hệ thống cung cấp cơ chế phê duyệt bằng mã PIN Quản lý cho các thao tác nhạy cảm và ghi nhận nhật ký kiểm toán (`audit_logs`, chỉ ghi thêm qua ứng dụng; chưa có cơ chế chống sửa trực tiếp trong cơ sở dữ liệu) theo quy chuẩn US-06, FR-10, BR-03, BR-04, NFR-03, ERR-02, ERR-03.
+
+### 6.1 Thao tác nhạy cảm yêu cầu phê duyệt Quản lý
+- **Hủy / Giảm số lượng món đã gửi bếp** (`POST /api/v1/orders/:id/items`): Yêu cầu mã PIN Quản lý và lý do hủy tối thiểu 5 ký tự. Khi được duyệt, hệ thống tự động phát sinh phiếu in hủy bếp `KOT_CANCEL` hiển thị tên người duyệt (`approverName`).
+- **Áp dụng giảm giá đơn hàng** (`POST /api/v1/orders/:id/discount`): Giảm theo số tiền cố định (VNĐ) hoặc phần trăm (%), yêu cầu mã PIN Quản lý và lý do. Cột `discount_percent` được lưu độc lập để tự động tính lại chính xác khi thay đổi món.
+- **Hủy toàn bộ đơn hàng có món** (`POST /api/v1/orders/:id/cancel`): Yêu cầu mã PIN Quản lý và lý do tối thiểu 5 ký tự.
+- **Bảo vệ Optimistic Locking (`expectedVersion`)**: API giảm giá và hủy đơn bắt buộc truyền `expectedVersion` nhằm ngăn chặn xung đột ghi đồng thời (trả về 409 Conflict khi phiên bản không khớp).
+
+### 6.2 Chính sách bảo mật mã PIN & Khóa tài khoản
+- **Độ phức tạp mã PIN (`src/server/approvals/pin-policy.ts`)**:
+  - Mã PIN gồm từ 4 đến 6 chữ số (`^\d{4,6}$`).
+  - Từ chối các mã PIN yếu hoặc dễ đoán: 4 chữ số trùng nhau (`1111`, `9999`), chuỗi tăng/giảm liên tiếp (`1234`, `4321`, `6789`), 2 cặp số lặp (`1212`, `6868`), và năm sinh phổ biến (1950 đến 2030).
+  - Không cho phép trùng với mã PIN của Quản lý khác đang hoạt động trong hệ thống.
+- **Cơ chế khóa tài khoản tự động (Account Lockout)**:
+  - Sai liên tiếp 5 lần mã PIN Quản lý hoặc mật khẩu đăng nhập: Khóa tài khoản trong vòng 5 phút (`ERR-03`, HTTP 429 Too Many Requests).
+  - Giao diện Modal trên POS hiển thị cảnh báo `ERR-02` kèm đồng hồ đếm ngược (`Statistic.Countdown`), giữ nguyên lý do đã nhập và xóa mã PIN để người dùng thử lại sau khi hết thời gian khóa.
+  - Phục hồi an toàn: Nhập mật khẩu đúng sau khi hết hạn khóa sẽ tự động đặt lại bộ đếm lỗi về 0.
+
+### 6.3 Nhật ký kiểm toán toàn vẹn (`audit_logs`)
+- Bảng `audit_logs` lưu vết chi tiết: `user_id`, `username`, `action`, `entity_type`, `entity_id`, `reason` (>= 5 ký tự), `metadata`, `ip_address`, `user_agent`, và dấu thời gian `created_at`.
+- Các hành động được kiểm toán tự động: `CANCEL_KITCHEN_ITEM`, `DISCOUNT_ORDER`, `CANCEL_ORDER`, `DELETE_EMPTY_ORDER`, `REMOVE_UNSENT_ITEM`, `SETTINGS_CHANGED`, `PIN_CHANGED`, `LOGIN_FAILED`, `LOGIN_LOCKED`.
+- **Ghi chú rủi ro đã chấp nhận (Accepted Risk)**:
+  Cơ chế khóa đăng nhập dựa theo `username` có thể bị kẻ xấu lợi dụng để tạm thời khóa tài khoản của người khác bằng cách cố ý gửi liên tiếp 5 lần mật khẩu sai. Rủi ro này được chấp nhận trong môi trường F&B nội bộ quán vì: (1) Các phiên làm việc đã đăng nhập trước đó vẫn hoạt động bình thường mà không bị ngắt quãng; (2) Tài khoản tự động mở khóa sau 5 phút; (3) Chưa áp dụng khóa theo địa chỉ IP do cờ `TRUST_PROXY` mặc định tắt (`false`) để tránh rủi ro giả mạo IP client trên mạng LAN.

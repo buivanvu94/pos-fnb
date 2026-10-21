@@ -134,7 +134,12 @@ export function renderKotCancelCanvas(payload: KotCancelPayload, width: number):
   drawTwoColumn(ctx, "Giờ hủy:", formatDateTime(payload.cancelledAt), y, width, { fontSize: 18 });
   y += 24;
   drawTwoColumn(ctx, "Người hủy:", payload.cancelledByName, y, width, { fontSize: 18 });
-  y += 26;
+  y += 24;
+  if (payload.approverName) {
+    drawTwoColumn(ctx, "Người duyệt:", payload.approverName, y, width, { fontSize: 18 });
+    y += 24;
+  }
+  y += 4;
 
   // Reason
   ctx.textAlign = "left";

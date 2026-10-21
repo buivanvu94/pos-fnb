@@ -3,6 +3,7 @@ import { requireRole } from "@/server/auth/require-role";
 import { can } from "@/lib/permissions";
 import { modifyOrderItemsSchema } from "@/server/orders/order-schema";
 import { modifyOrderItems } from "@/server/orders/order-items-service";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -11,10 +12,9 @@ interface RouteParams {
 /**
  * POST /api/v1/orders/:id/items
  * Adds items, changes quantity, selects toppings, and updates notes (FR-02, BR-09, ERR-07).
- * Prevents modifying/deleting printed items without PIN (409), enforces optimistic locking (409).
+ * Allows deleting or reducing printed items with valid Manager PIN approval (BR-03, FR-10).
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
-  // Permission verified via requireRole/can; order is already bound to shiftId established at opening
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;
@@ -50,7 +50,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const result = await modifyOrderItems(orderId, parsed.data);
+    const clientIp = getClientIp(req);
+    const userAgent = getUserAgent(req);
+    const result = await modifyOrderItems(
+      orderId,
+      parsed.data,
+      auth.user,
+      clientIp,
+      userAgent,
+    );
 
     if (!result.ok) {
       return NextResponse.json(

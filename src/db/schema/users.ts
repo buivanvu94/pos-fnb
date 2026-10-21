@@ -16,6 +16,8 @@ export const users = pgTable(
     pinHash: text("pin_hash"), // Hashed 4-6 digit PIN for Manager approvals (FR-10, BR-04)
     pinFailedCount: integer("pin_failed_count").notNull().default(0),
     pinLockedUntil: timestamp("pin_locked_until", { withTimezone: true }),
+    loginFailedCount: integer("login_failed_count").notNull().default(0),
+    loginLockedUntil: timestamp("login_locked_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

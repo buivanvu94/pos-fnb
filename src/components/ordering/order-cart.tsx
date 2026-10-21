@@ -1,6 +1,6 @@
 import React from "react";
 import { Card, Table, Button, Space, Typography, Statistic, Tooltip, Tag, Popconfirm } from "antd";
-import { PlusOutlined, MinusOutlined, DeleteOutlined, SendOutlined, SwapOutlined, PrinterOutlined } from "@ant-design/icons";
+import { PlusOutlined, MinusOutlined, DeleteOutlined, SendOutlined, SwapOutlined, PrinterOutlined, PercentageOutlined } from "@ant-design/icons";
 import { formatVnd } from "@/lib/money";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 
@@ -11,11 +11,15 @@ interface OrderCartProps {
   tableName?: string;
   loading?: boolean;
   sendingKitchen?: boolean;
+  userRole?: string;
   onQuantityChange: (item: OrderItemDetail, newQty: number) => void;
   onDeleteItem: (item: OrderItemDetail) => void;
+  onCancelKitchenItem?: (item: OrderItemDetail) => void;
+  onOpenDiscountModal?: () => void;
   onSendKitchen: () => void;
   onOpenTransferModal: () => void;
   onCancelOrder?: () => void;
+  onCancelOrderWithItems?: () => void;
 }
 
 export function OrderCart({
@@ -23,14 +27,19 @@ export function OrderCart({
   tableName,
   loading = false,
   sendingKitchen = false,
+  userRole,
   onQuantityChange,
   onDeleteItem,
+  onCancelKitchenItem,
+  onOpenDiscountModal,
   onSendKitchen,
   onOpenTransferModal,
   onCancelOrder,
+  onCancelOrderWithItems,
 }: OrderCartProps) {
   const items = order?.items ?? [];
   const hasUnprintedItems = items.some((i) => !i.isPrintedKitchen);
+  const canDiscountOrCancel = userRole === "QUAN_LY" || userRole === "THU_NGAN";
 
   const columns = [
     {
@@ -99,7 +108,17 @@ export function OrderCart({
       key: "action",
       width: 45,
       render: (_: any, record: OrderItemDetail) =>
-        record.isPrintedKitchen ? null : (
+        record.isPrintedKitchen ? (
+          <Tooltip title="Hủy món đã gửi bếp">
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => onCancelKitchenItem?.(record)}
+            />
+          </Tooltip>
+        ) : (
           <Popconfirm
             title="Xóa món này khỏi đơn?"
             okText="Xóa"
@@ -114,18 +133,8 @@ export function OrderCart({
 
   return (
     <Card
-      style={{
-        borderRadius: 8,
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-      }}
-      bodyStyle={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        padding: 16,
-      }}
+      style={{ borderRadius: 8, display: "flex", flexDirection: "column", height: "100%" }}
+      bodyStyle={{ display: "flex", flexDirection: "column", height: "100%", padding: 16 }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div>
@@ -155,13 +164,25 @@ export function OrderCart({
       </div>
 
       <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
-          <Text style={{ fontSize: 16 }}>Tổng thanh toán:</Text>
-          <Statistic
-            value={order?.totalAmount ?? 0}
-            formatter={(val) => formatVnd(Number(val))}
-            valueStyle={{ color: "#cf1322", fontWeight: 700, fontSize: 24 }}
-          />
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+            <Text>Tổng tiền:</Text>
+            <Text strong>{formatVnd(order?.totalAmount ?? 0)}</Text>
+          </div>
+          {(order?.discountAmount ?? 0) > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <Text type="danger">Giảm giá:</Text>
+              <Text strong type="danger">-{formatVnd(order?.discountAmount ?? 0)}</Text>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <Text style={{ fontSize: 16, fontWeight: 600 }}>Khách cần trả:</Text>
+            <Statistic
+              value={order?.finalAmount ?? order?.totalAmount ?? 0}
+              formatter={(val) => formatVnd(Number(val))}
+              valueStyle={{ color: "#cf1322", fontWeight: 700, fontSize: 22 }}
+            />
+          </div>
         </div>
 
         <Space direction="vertical" style={{ width: "100%" }} size={8}>
@@ -177,28 +198,31 @@ export function OrderCart({
             Gửi Bếp
           </Button>
 
-          {items.length === 0 && onCancelOrder && (
-            <Popconfirm
-              title="Hủy đơn hàng trống này?"
-              okText="Hủy đơn"
-              cancelText="Không"
-              onConfirm={onCancelOrder}
+          {canDiscountOrCancel && (
+            <Button
+              block
+              icon={<PercentageOutlined />}
+              disabled={!order || order.totalAmount === 0 || loading}
+              onClick={onOpenDiscountModal}
             >
-              <Button danger block disabled={loading}>
-                Hủy đơn hàng trống
-              </Button>
+              Giảm giá
+            </Button>
+          )}
+
+          {items.length === 0 && onCancelOrder && (
+            <Popconfirm title="Hủy đơn hàng trống này?" okText="Hủy đơn" cancelText="Không" onConfirm={onCancelOrder}>
+              <Button danger block disabled={loading}>Hủy đơn hàng trống</Button>
             </Popconfirm>
           )}
 
-          <Tooltip title="Chức năng thanh toán và in tạm tính sẽ mở ở Phase 07">
-            <Button
-              size="large"
-              block
-              disabled
-              icon={<PrinterOutlined />}
-            >
-              In tạm tính
+          {items.length > 0 && canDiscountOrCancel && onCancelOrderWithItems && (
+            <Button danger block disabled={loading} onClick={onCancelOrderWithItems}>
+              Hủy đơn hàng
             </Button>
+          )}
+
+          <Tooltip title="Chức năng thanh toán và in tạm tính sẽ mở ở Phase 07">
+            <Button size="large" block disabled icon={<PrinterOutlined />}>In tạm tính</Button>
           </Tooltip>
         </Space>
       </div>

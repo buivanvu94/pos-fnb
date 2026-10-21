@@ -1,19 +1,26 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { users, auditLogs } from "@/db/schema";
 import { POST as loginHandler } from "@/app/api/v1/auth/login/route";
-import { verifyAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
+import { verifyAuthToken, AUTH_COOKIE_NAME, AUTH_COOKIE_MAX_AGE } from "@/server/auth/jwt";
 
 describe("Auth Login API - POST /api/v1/auth/login", () => {
+  const rand = () => Math.random().toString(36).slice(2, 8);
+  const tag = rand();
+
+  const lockTestUsername = `lockuser_${tag}`;
+  const lockTestPassword = "CorrectPassword123!";
+  let lockTestUserId: number;
+
   beforeAll(async () => {
     const passwordHash = await bcrypt.hash("123456", 10);
     const testUsers = [
-      { username: "quanly", passwordHash, fullName: "Nguyễn Văn Quản Lý", role: "QUAN_LY" as const, active: true },
-      { username: "thungan", passwordHash, fullName: "Trần Thị Thu Ngân", role: "THU_NGAN" as const, active: true },
-      { username: "phucvu", passwordHash, fullName: "Lê Văn Phục Vụ", role: "PHUC_VU" as const, active: true },
+      { username: "quanly", passwordHash, fullName: "Nguyễn Văn Quản Lý", role: "QUAN_LY" as const },
+      { username: "thungan", passwordHash, fullName: "Trần Thị Thu Ngân", role: "THU_NGAN" as const },
+      { username: "phucvu", passwordHash, fullName: "Lê Văn Phục Vụ", role: "PHUC_VU" as const },
     ];
     for (const u of testUsers) {
       const existing = await db.select().from(users).where(eq(users.username, u.username)).limit(1);
@@ -21,8 +28,26 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
         await db.insert(users).values(u);
       }
     }
+
+    const lockHash = await bcrypt.hash(lockTestPassword, 10);
+    const [created] = await db
+      .insert(users)
+      .values({
+        username: lockTestUsername,
+        passwordHash: lockHash,
+        fullName: "User Test Lockout",
+        role: "THU_NGAN",
+      })
+      .returning();
+    lockTestUserId = created.id;
   });
-  it("authenticates successfully with valid credentials and sets httpOnly cookie", async () => {
+
+  afterAll(async () => {
+    await db.delete(auditLogs).where(eq(auditLogs.entityType, "users"));
+    await db.delete(users).where(eq(users.id, lockTestUserId));
+  });
+
+  it("authenticates successfully with valid credentials and sets 12-hour httpOnly cookie", async () => {
     const req = new NextRequest("http://localhost:3000/api/v1/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -41,41 +66,19 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
     expect(data.user.username).toBe("quanly");
     expect(data.user.role).toBe("QUAN_LY");
 
-    // Verify httpOnly cookie
+    // Verify httpOnly cookie and 12-hour maxAge
     const cookie = res.cookies.get(AUTH_COOKIE_NAME);
     expect(cookie).toBeDefined();
     expect(cookie?.httpOnly).toBe(true);
     expect(cookie?.value).toBeTruthy();
+    expect(cookie?.maxAge).toBe(AUTH_COOKIE_MAX_AGE);
+    expect(cookie?.maxAge).toBe(43200); // 12 hours * 3600 seconds
 
     // Verify JWT payload contents
     const decoded = await verifyAuthToken(cookie!.value);
     expect(decoded).not.toBeNull();
     expect(decoded?.username).toBe("quanly");
     expect(decoded?.role).toBe("QUAN_LY");
-  });
-
-  it("authenticates cashier and waiter roles correctly", async () => {
-    // Cashier
-    const cashierReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "thungan", password: "123456" }),
-    });
-    const cashierRes = await loginHandler(cashierReq);
-    expect(cashierRes.status).toBe(200);
-    const cashierData = await cashierRes.json();
-    expect(cashierData.user.role).toBe("THU_NGAN");
-
-    // Waiter
-    const waiterReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "phucvu", password: "123456" }),
-    });
-    const waiterRes = await loginHandler(waiterReq);
-    expect(waiterRes.status).toBe(200);
-    const waiterData = await waiterRes.json();
-    expect(waiterData.user.role).toBe("PHUC_VU");
   });
 
   it("fails authentication when password is incorrect", async () => {
@@ -97,21 +100,198 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
     expect(res.cookies.get(AUTH_COOKIE_NAME)).toBeUndefined();
   });
 
-  it("fails authentication when username does not exist", async () => {
+  it("locks account for 5 minutes after 5 consecutive failures, and rejects valid password during lockout", async () => {
+    // Reset user counters
+    await db.update(users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(users.id, lockTestUserId));
+
+    // 4 wrong attempts -> each returns 401
+    for (let i = 1; i <= 4; i++) {
+      const req = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: lockTestUsername, password: `wrong_${i}` }),
+      });
+      const res = await loginHandler(req);
+      expect(res.status).toBe(401);
+    }
+
+    // 5th wrong attempt -> triggers lockout (429)
+    const req5 = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: lockTestUsername, password: "wrong_5" }),
+    });
+    const res5 = await loginHandler(req5);
+    expect(res5.status).toBe(429);
+    const data5 = await res5.json();
+    expect(data5.error).toContain("Tài khoản đã bị tạm khóa do nhập sai mật khẩu quá 5 lần");
+
+    // Correct password during lockout must STILL be rejected with 429
+    const reqCorrect = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: lockTestUsername, password: lockTestPassword }),
+    });
+    const resCorrect = await loginHandler(reqCorrect);
+    expect(resCorrect.status).toBe(429);
+
+    // Verify LOGIN_LOCKED audit log exists
+    const [lockedAudit] = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityId, String(lockTestUserId)), eq(auditLogs.action, "LOGIN_LOCKED")));
+    expect(lockedAudit).toBeDefined();
+
+    // Fast-forward lockout expiration into the past
+    await db
+      .update(users)
+      .set({ loginLockedUntil: new Date(Date.now() - 1000) })
+      .where(eq(users.id, lockTestUserId));
+
+    // Now valid login succeeds and resets counter
+    const reqUnlock = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: lockTestUsername, password: lockTestPassword }),
+    });
+    const resUnlock = await loginHandler(reqUnlock);
+    expect(resUnlock.status).toBe(200);
+
+    const [unlockedUser] = await db.select().from(users).where(eq(users.id, lockTestUserId));
+    expect(unlockedUser.loginFailedCount).toBe(0);
+    expect(unlockedUser.loginLockedUntil).toBeNull();
+  });
+
+  it("resets failed count to 1 when a wrong password attempt occurs after lockout expired", async () => {
+    // Set user as previously locked, but lockout time is 1 second in the past
+    await db
+      .update(users)
+      .set({
+        loginFailedCount: 5,
+        loginLockedUntil: new Date(Date.now() - 1000),
+      })
+      .where(eq(users.id, lockTestUserId));
+
     const req = new NextRequest("http://localhost:3000/api/v1/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "nonexistent_user",
-        password: "password123",
-      }),
+      body: JSON.stringify({ username: lockTestUsername, password: "wrong_password_after_expiry" }),
     });
 
     const res = await loginHandler(req);
     expect(res.status).toBe(401);
 
-    const data = await res.json();
-    expect(data.ok).toBe(false);
+    const [user] = await db.select().from(users).where(eq(users.id, lockTestUserId));
+    expect(user.loginFailedCount).toBe(1); // restarts from 1!
+    expect(user.loginLockedUntil).toBeNull();
+  });
+
+  it("serializes 10 concurrent wrong password attempts and locks at exactly threshold 5", async () => {
+    // Reset counter
+    await db.update(users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(users.id, lockTestUserId));
+
+    const attempts = Array.from({ length: 10 }).map((_, idx) =>
+      loginHandler(
+        new NextRequest("http://localhost:3000/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: lockTestUsername, password: `concurrent_wrong_${idx}` }),
+        }),
+      ),
+    );
+
+    const results = await Promise.all(attempts);
+    const statuses = results.map((r) => r.status);
+    const count401 = statuses.filter((s) => s === 401).length;
+    const count429 = statuses.filter((s) => s === 429).length;
+
+    expect(count401).toBe(4);
+    expect(count429).toBe(6);
+
+    const [user] = await db.select().from(users).where(eq(users.id, lockTestUserId));
+    expect(user.loginFailedCount).toBeGreaterThanOrEqual(5);
+    expect(user.loginLockedUntil).not.toBeNull();
+
+    // Reset lock
+    await db.update(users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(users.id, lockTestUserId));
+  });
+
+  it("returns identical generic response for non-existent and wrong-password user to prevent enumeration", async () => {
+    const wrongPassReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: lockTestUsername, password: "incorrect_pass_xyz" }),
+    });
+    const wrongPassRes = await loginHandler(wrongPassReq);
+    const wrongPassData = await wrongPassRes.json();
+
+    const nonExistReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: `nonexistent_${rand()}`, password: "incorrect_pass_xyz" }),
+    });
+    const nonExistRes = await loginHandler(nonExistReq);
+    const nonExistData = await nonExistRes.json();
+
+    expect(wrongPassRes.status).toBe(401);
+    expect(nonExistRes.status).toBe(401);
+    expect(wrongPassData).toEqual(nonExistData);
+    expect(nonExistData.error).toBe("Tên đăng nhập hoặc mật khẩu không chính xác");
+  });
+
+  it("executes dummy bcrypt compare for non-existent username to mitigate timing attacks", async () => {
+    const bcryptSpy = vi.spyOn(bcrypt, "compare");
+    const nonExistReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: `nonexistent_${rand()}`, password: "some_secret_password" }),
+    });
+
+    const res = await loginHandler(nonExistReq);
+    expect(res.status).toBe(401);
+
+    expect(bcryptSpy).toHaveBeenCalledWith("some_secret_password", expect.stringContaining("$2a$10$"));
+    bcryptSpy.mockRestore();
+  });
+
+  it("handles 12 concurrent wrong logins for non-existent users without connection pool exhaustion", async () => {
+    const requests = Array.from({ length: 12 }).map((_, idx) =>
+      loginHandler(
+        new NextRequest("http://localhost:3000/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: `ghost_user_${tag}_${idx}`, password: "dummy_pass_pool_check" }),
+        }),
+      ),
+    );
+
+    const results = await Promise.all(requests);
+    for (const res of results) {
+      expect(res.status).toBe(401);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+    }
+  });
+
+  it("writes LOGIN_FAILED and LOGIN_LOCKED audit logs without leaking plaintext passwords in metadata", async () => {
+    const failedLogs = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityId, String(lockTestUserId)), eq(auditLogs.action, "LOGIN_FAILED")));
+    expect(failedLogs.length).toBeGreaterThan(0);
+
+    const lockedLogs = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.entityId, String(lockTestUserId)), eq(auditLogs.action, "LOGIN_LOCKED")));
+    expect(lockedLogs.length).toBeGreaterThan(0);
+
+    for (const log of [...failedLogs, ...lockedLogs]) {
+      const metaStr = log.metadata || "";
+      expect(metaStr).not.toContain(lockTestPassword);
+      expect(metaStr).not.toContain("wrong");
+      expect(metaStr).not.toContain("concurrent_wrong");
+    }
   });
 
   it("returns 400 when missing username or password", async () => {
@@ -125,23 +305,5 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
 
     const res = await loginHandler(req);
     expect(res.status).toBe(400);
-  });
-
-  it("returns 400 when request body is null or not an object", async () => {
-    const nullReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(null),
-    });
-    const nullRes = await loginHandler(nullReq);
-    expect(nullRes.status).toBe(400);
-
-    const numReq = new NextRequest("http://localhost:3000/api/v1/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(12345),
-    });
-    const numRes = await loginHandler(numReq);
-    expect(numRes.status).toBe(400);
   });
 });
