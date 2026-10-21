@@ -15,6 +15,7 @@ import {
 import { useRouter, usePathname } from "next/navigation";
 import dayjs from "dayjs";
 import type { Role } from "@/lib/permissions";
+import { ShiftToolbar } from "@/components/shift/shift-toolbar";
 
 const { Header, Content } = Layout;
 const { Text } = Typography;
@@ -163,15 +164,7 @@ export function MainLayout({ children }: MainLayoutProps) {
             </Dropdown>
           )}
 
-          <Button
-            type="primary"
-            danger
-            icon={<CheckCircleOutlined />}
-            style={{ height: 44, fontWeight: 600 }}
-            onClick={() => router.push("/shifts/close")}
-          >
-            Kết ca
-          </Button>
+          <ShiftToolbar />
         </Space>
       </Header>
 
