@@ -1,0 +1,128 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { orders } from "@/db/schema";
+import { withManagerApproval } from "@/server/approvals/with-manager-approval";
+import { logAudit } from "@/server/approvals/audit-log-service";
+import { getOrderDetails } from "./order-service";
+import { TxAbortError } from "./tx-abort-error";
+import type { ActingUser } from "@/server/approvals/approval-types";
+import type { OrderDetail } from "./order-types";
+
+export interface ApplyDiscountInput {
+  amount?: number;
+  percent?: number;
+  lyDo: string;
+  pinCode?: string;
+  expectedVersion?: number;
+}
+
+export type DiscountResult =
+  | { ok: true; order: OrderDetail }
+  | { ok: false; error: string; status: number };
+
+/**
+ * Applies a discount to an active order with Manager approval (FR-10, BR-03).
+ * Validates role permissions, ensures 0 <= discount <= totalAmount, and recalculates finalAmount.
+ */
+export async function applyOrderDiscount(
+  orderId: number,
+  input: ApplyDiscountInput,
+  actingUser: ActingUser,
+  clientIp?: string,
+): Promise<DiscountResult> {
+  const approval = await withManagerApproval(
+    actingUser,
+    "DISCOUNT_ORDER",
+    { pinCode: input.pinCode, lyDo: input.lyDo },
+    clientIp,
+  );
+
+  if (!approval.ok) {
+    return { ok: false, error: approval.error, status: approval.status };
+  }
+
+  const userId = actingUser.userId ?? actingUser.id!;
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select()
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1)
+        .for("update");
+
+      if (!order) throw new TxAbortError("Đơn hàng không tồn tại", 404);
+      if (order.status !== "DANG_PHUC_VU") {
+        throw new TxAbortError("Đơn hàng không ở trạng thái đang phục vụ, không thể giảm giá", 409);
+      }
+      if (input.expectedVersion !== undefined && order.version !== input.expectedVersion) {
+        throw new TxAbortError("Đơn hàng đã được cập nhật bởi phiên làm việc khác, vui lòng tải lại", 409);
+      }
+
+      if (input.amount === undefined && input.percent === undefined) {
+        throw new TxAbortError("Cần cung cấp số tiền giảm giá hoặc phần trăm giảm giá", 400);
+      }
+
+      let discountAmount = 0;
+      if (input.percent !== undefined) {
+        if (input.percent < 0 || input.percent > 100) {
+          throw new TxAbortError("Phần trăm giảm giá phải từ 0% đến 100%", 400);
+        }
+        discountAmount = Math.round(order.totalAmount * (input.percent / 100));
+      } else if (input.amount !== undefined) {
+        if (input.amount < 0) {
+          throw new TxAbortError("Số tiền giảm giá không được nhỏ hơn 0 VNĐ", 400);
+        }
+        discountAmount = input.amount;
+      }
+
+      if (discountAmount > order.totalAmount) {
+        throw new TxAbortError("Số tiền giảm giá không được vượt quá tổng tiền hóa đơn", 400);
+      }
+
+      const finalAmount = Math.max(0, order.totalAmount - discountAmount);
+
+      await tx
+        .update(orders)
+        .set({
+          discountAmount,
+          finalAmount,
+          version: order.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, orderId));
+
+      await logAudit(
+        {
+          userId,
+          action: "DISCOUNT",
+          entityType: "orders",
+          entityId: orderId,
+          reason: approval.reason,
+          metadata: {
+            orderCode: order.orderCode,
+            totalAmount: order.totalAmount,
+            discountAmount,
+            finalAmount,
+            percent: input.percent,
+            amount: input.amount,
+            requesterId: userId,
+            approverId: approval.approverId,
+            approverName: approval.approverName,
+          },
+          ipAddress: clientIp,
+        },
+        tx,
+      );
+
+      const updated = await getOrderDetails(orderId, tx);
+      return { ok: true, order: updated! };
+    });
+  } catch (err: any) {
+    if (err instanceof TxAbortError) {
+      return { ok: false, error: err.message, status: err.status };
+    }
+    throw err;
+  }
+}

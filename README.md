@@ -104,10 +104,10 @@ npm run build
 ```
 src/
 ├── app/                  # Next.js App Router (login, tables, counter, admin, api)
-├── components/           # UI Ant Design components (AntdProvider, MainLayout, menu)
+├── components/           # UI Ant Design components (AntdProvider, MainLayout, menu, approval)
 ├── db/                   # Drizzle ORM schema, migrations, seed, sequential code generator
 ├── lib/                  # Tiện ích tiền tệ (money), danh mục lỗi (error-catalog), phân quyền (permissions)
-├── server/               # Logic backend, xác thực JWT (require-role, jwt), menu service
+├── server/               # Logic backend, xác thực JWT (require-role, jwt), menu service, approvals
 └── theme/                # Cấu hình Ant Design theme token (touch >= 44px, màu trạng thái bàn)
 tests/                    # Bộ kiểm thử tự động Vitest
 docs/                     # Tài liệu kiến trúc và hướng dẫn dự án
@@ -168,3 +168,45 @@ Hệ thống in nhiệt mạng LAN theo chuẩn ESC/POS phục vụ in phiếu c
   npm run print:test -- 192.168.1.200 kitchen
   npm run print:test -- 192.168.1.202 receipt
   ```
+
+## 6. Xác thực PIN Quản lý & Nhật ký kiểm toán (Phase 06)
+
+Hệ thống xác thực mã PIN phê duyệt của Quản lý cho các thao tác nhạy cảm (US-06, FR-10, BR-03, BR-04, NFR-03, ERR-02, ERR-03) nhằm phòng chống gian lận và thất thoát doanh thu (RSK-02, DEC-03).
+
+### 6.1 Cơ chế xác thực & Khóa an toàn
+- **Độ dài mã PIN**: 4 đến 6 chữ số (`/^\d{4,6}$/`), băm bảo mật bằng `bcryptjs`. Tuyệt đối không lưu trữ, ghi nhật ký hay phản hồi mã PIN dạng văn bản rõ.
+- **Bộ đếm sai & Khóa theo người thao tác**: Cột `pin_failed_count` và `pin_locked_until` nằm trên dòng người dùng đang thực hiện yêu cầu trong bảng `users`.
+- **Khóa 5 phút khi sai quá 5 lần (BR-04, ERR-03)**:
+  - Nếu nhập sai liên tiếp 5 lần, tài khoản bị khóa xác thực trong 5 phút, trả về mã lỗi HTTP 429 kèm thông báo `ERR-03`: *"Bạn đã nhập sai mã PIN quá 5 lần. Chức năng xác thực bị khóa tạm thời trong 5 phút!"*.
+  - Trong thời gian 5 phút hiệu lực của khóa, mọi yêu cầu xác thực đều bị từ chối ngay lập tức với HTTP 429 `ERR-03` mà không thực hiện so khớp mã PIN (kể cả khi nhập đúng mã PIN).
+  - Khi thời hạn khóa kết thúc, hệ thống tự động mở khóa và đặt lại bộ đếm về 0 ở lần xác thực tiếp theo.
+- **Tính nguyên tử & Độc lập giao dịch**:
+  - Việc tăng bộ đếm sai và gán khóa được thực thi trong một transaction độc lập đã commit với cơ chế khóa dòng (`FOR UPDATE`). Do đó, kể cả khi lệnh nghiệp vụ của người dùng bị roll back, bộ đếm số lần sai và trạng thái khóa vẫn được giữ nguyên vẹn.
+  - Đảm bảo an toàn khi có nhiều request sai gửi đồng thời: hệ thống tuần tự hóa và khóa chính xác tại ngưỡng 5 lần mà không bị lọt.
+
+### 6.2 Các thao tác nhạy cảm được bảo vệ
+- **Hủy hoặc giảm số lượng món đã gửi bếp (BR-03, FR-10)**:
+  - Cho phép hủy hoặc giảm số lượng món đã in qua `POST /api/v1/orders/:id/items` khi có lý do tối thiểu 5 ký tự và mã PIN Quản lý.
+  - Cập nhật dòng món (`isCancelled: true` hoặc giảm `quantity`), lưu `cancelReason`, tính toán lại tổng tiền và khách cần trả.
+  - Tự động tạo phiếu báo hủy KOT (`KOT_CANCEL`) gửi tới máy in Bếp (`targetPrinter: "KITCHEN"`) hoặc Bar (`targetPrinter: "BAR"`) tương ứng; dispatch sau khi transaction commit.
+  - Xóa hoặc chỉnh sửa món chưa gửi bếp không yêu cầu mã PIN như thông thường.
+- **Giảm giá, chiết khấu hóa đơn (`POST /api/v1/orders/:id/discount`)**:
+  - Hỗ trợ giảm giá theo số tiền cố định (VNĐ) hoặc theo phần trăm (0 - 100%).
+  - Ràng buộc: `0 <= GiảmGiá <= TổngTiền`, `KháchCầnTrả = TổngTiền - GiảmGiá` (không âm).
+  - Tự động tính toán lại chính xác khi thêm/bớt món sau đó: nếu giảm theo phần trăm thì áp dụng lại tỷ lệ phần trăm trên tổng mới; nếu theo số tiền cố định thì giữ nguyên và giới hạn tối đa không vượt quá tổng mới.
+- **Hủy hóa đơn đang phục vụ có món đã gửi bếp (`POST /api/v1/orders/:id/cancel`)**:
+  - Yêu cầu mã PIN Quản lý và lý do (>= 5 ký tự).
+  - Chuyển trạng thái đơn về `DA_HUY`, giải phóng bàn về `TRONG`, tự động gửi phiếu báo hủy KOT cho các món đã gửi chế biến.
+  - Hóa đơn đã thanh toán (`DA_THANH_TOAN`) bị chặn với HTTP 409 (BR-08).
+
+### 6.3 Phân quyền & Cờ cấu hình
+- **Ma trận phân quyền (SRS mục 2.5)**:
+  - `QUAN_LY`: Được phép tự thực hiện mọi thao tác nhạy cảm mà không cần nhập mã PIN (nhưng bắt buộc nhập lý do >= 5 ký tự và hệ thống vẫn ghi nhận nhật ký kiểm toán với người duyệt là chính mình).
+  - `THU_NGAN`: Được phép hủy món, giảm giá và hủy đơn khi có mã PIN Quản lý.
+  - `PHUC_VU`: Chỉ được phép hủy món đã gửi bếp khi có mã PIN Quản lý. Các thao tác giảm giá và hủy đơn bị chặn tuyệt đối (HTTP 403) kể cả khi cung cấp đúng mã PIN.
+- **Cấu hình `approval.pinRequired` (SRS mục 10)**:
+  - Cờ cấu hình trong bảng `settings` (mặc định: `true`).
+  - Quản lý có thể cập nhật qua API `PUT /api/v1/settings/approval`.
+  - **CẢNH BÁO AN TOÀN**: Tùy chọn tắt yêu cầu mã PIN (`pinRequired = false`) **CHỈ DÙNG TRONG MÔI TRƯỜNG PHÁT TRIỂN / KIỂM THỬ**. Khi tắt, hệ thống vẫn bắt buộc nhập lý do tối thiểu 5 ký tự và ghi nhật ký kiểm toán đầy đủ.
+- **Đổi mã PIN Quản lý (`PUT /api/v1/users/me/pin`)**:
+  - Quản lý có thể tự đặt hoặc đổi mã PIN cá nhân của mình sau khi xác thực mật khẩu đăng nhập hiện tại. Đặt lại bộ đếm sai về 0 và mở khóa.

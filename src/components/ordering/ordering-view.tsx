@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useState, useEffect, useCallback } from "react";
 import { Button, Row, Col, Typography, Space, App, Spin } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
@@ -6,8 +8,10 @@ import { OrderCart } from "./order-cart";
 import { ItemCustomizerDrawer, ToppingOption } from "./item-customizer-drawer";
 import { TransferMergeModal } from "./transfer-merge-modal";
 import { useOrderActions } from "./use-order-actions";
+import { useOrderApprovalActions } from "./use-order-approval-actions";
+import { ManagerApprovalModal, DiscountModal, useManagerApproval } from "@/components/approval";
 import type { TableWithOrderInfo } from "@/server/tables/table-service";
-import type { OrderDetail } from "@/server/orders/order-service";
+import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 
 const { Title, Text } = Typography;
 
@@ -30,18 +34,20 @@ export function OrderingView({
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(true);
   const [transferLoading, setTransferLoading] = useState(false);
+  const [userRole, setUserRole] = useState<string>("PHUC_VU");
 
   // Menu data
   const [menuItems, setMenuItems] = useState<MenuItemData[]>([]);
   const [categories, setCategories] = useState<CategoryData[]>([]);
   const [toppings, setToppings] = useState<ToppingOption[]>([]);
 
-  // Drawer & Modal states
+  // Drawers & Modals
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [customizingItem, setCustomizingItem] = useState<MenuItemData | null>(null);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [discountModalOpen, setDiscountModalOpen] = useState(false);
+  const [discountError, setDiscountError] = useState<string | null>(null);
 
-  // Fetch full order details
   const fetchOrder = useCallback(async () => {
     try {
       const res = await fetch(`/api/v1/orders/${orderId}`);
@@ -58,94 +64,72 @@ export function OrderingView({
     }
   }, [orderId, message]);
 
-  // Hook for actions
-  const {
-    actionLoading,
-    sendingKitchen,
-    quickAdd,
-    addCustomized,
-    changeQuantity,
-    deleteItem,
-    sendKitchen,
-    cancelEmptyOrder,
-  } = useOrderActions(order, setOrder, fetchOrder, onTableStatusChanged);
+  const { actionLoading, sendingKitchen, quickAdd, addCustomized, changeQuantity, deleteItem, sendKitchen, cancelEmptyOrder } =
+    useOrderActions(order, setOrder, fetchOrder, onTableStatusChanged);
 
-  // Fetch menu, categories, toppings
+  const { approvalLoading, cancelKitchenItem, applyDiscount, cancelOrderWithItems } =
+    useOrderApprovalActions(order, setOrder, fetchOrder, onTableStatusChanged);
+
+  const { modalState, requestApproval, handleConfirm, handleCancel } = useManagerApproval();
+
   useEffect(() => {
     fetchOrder();
 
-    fetch("/api/v1/menu/items")
+    fetch("/api/v1/auth/me")
       .then((r) => r.json())
-      .then((d) => d.ok && setMenuItems(d.data || []))
+      .then((d) => d.ok && d.data && setUserRole(d.data.role))
       .catch(() => {});
 
-    fetch("/api/v1/menu/categories")
-      .then((r) => r.json())
-      .then((d) => d.ok && setCategories(d.data || []))
-      .catch(() => {});
-
-    fetch("/api/v1/menu/toppings")
-      .then((r) => r.json())
-      .then((d) => d.ok && setToppings(d.data || []))
-      .catch(() => {});
+    fetch("/api/v1/menu/items").then((r) => r.json()).then((d) => d.ok && setMenuItems(d.data || [])).catch(() => {});
+    fetch("/api/v1/menu/categories").then((r) => r.json()).then((d) => d.ok && setCategories(d.data || [])).catch(() => {});
+    fetch("/api/v1/menu/toppings").then((r) => r.json()).then((d) => d.ok && setToppings(d.data || [])).catch(() => {});
   }, [fetchOrder]);
 
-  // Transfer / Merge confirm
-  const handleTransferMergeConfirm = async (transferData: {
-    banNguonId: number;
-    banDichId: number;
-    loai: "CHUYEN" | "GOP";
-  }) => {
-    setTransferLoading(true);
-    try {
-      const res = await fetch("/api/v1/tables/transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(transferData),
-      });
-      const data = await res.json();
+  const handleCancelKitchenItemClick = async (item: OrderItemDetail) => {
+    const approval = await requestApproval({
+      title: "Hủy món đã gửi bếp",
+      actionDescription: `Món: ${item.menuItemName} (Số lượng: ${item.quantity})`,
+      isPinRequired: userRole !== "QUAN_LY",
+    });
+    if (approval) {
+      await cancelKitchenItem(item, approval);
+    }
+  };
 
-      if (data.ok) {
-        message.success(
-          transferData.loai === "CHUYEN"
-            ? "Chuyển bàn thành công"
-            : "Gộp bàn thành công",
-        );
-        setTransferModalOpen(false);
-        onTableStatusChanged();
-        onBackToTables();
-      } else {
-        message.error(data.error || "Không thể thực hiện chuyển/gộp bàn");
-      }
-    } catch {
-      message.error("Lỗi kết nối khi chuyển/gộp bàn");
-    } finally {
-      setTransferLoading(false);
+  const handleCancelOrderWithItemsClick = async () => {
+    const approval = await requestApproval({
+      title: "Hủy đơn hàng",
+      actionDescription: `Mã đơn: ${order?.orderCode}`,
+      isPinRequired: userRole !== "QUAN_LY",
+    });
+    if (approval) {
+      const res = await cancelOrderWithItems(approval);
+      if (res.ok) onBackToTables();
+    }
+  };
+
+  const handleConfirmDiscount = async (data: { amount?: number; percent?: number; pinCode?: string; lyDo: string }) => {
+    setDiscountError(null);
+    const res = await applyDiscount(data);
+    if (res.ok) {
+      setDiscountModalOpen(false);
+    } else {
+      setDiscountError(res.error || "Không thể áp dụng giảm giá");
     }
   };
 
   if (loadingOrder) {
-    return (
-      <div style={{ textAlign: "center", padding: 80 }}>
-        <Spin size="large" />
-      </div>
-    );
+    return <div style={{ textAlign: "center", padding: 80 }}><Spin size="large" /></div>;
   }
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={onBackToTables}>
-            Sơ đồ bàn
-          </Button>
-          <Title level={4} style={{ margin: 0 }}>
-            {table.name} ({table.areaName || "Khu vực"})
-          </Title>
+          <Button icon={<ArrowLeftOutlined />} onClick={onBackToTables}>Sơ đồ bàn</Button>
+          <Title level={4} style={{ margin: 0 }}>{table.name} ({table.areaName || "Khu vực"})</Title>
         </Space>
-        <Text type="secondary">
-          Mã đơn: {order?.orderCode || "—"} (v{order?.version || 1})
-        </Text>
+        <Text type="secondary">Mã đơn: {order?.orderCode || "—"} (v{order?.version || 1})</Text>
       </div>
 
       <Row gutter={[16, 16]}>
@@ -155,10 +139,7 @@ export function OrderingView({
             categories={categories}
             loading={actionLoading}
             onQuickAddItem={quickAdd}
-            onCustomizeItem={(it) => {
-              setCustomizingItem(it);
-              setCustomizerOpen(true);
-            }}
+            onCustomizeItem={(it) => { setCustomizingItem(it); setCustomizerOpen(true); }}
           />
         </Col>
 
@@ -166,16 +147,20 @@ export function OrderingView({
           <OrderCart
             order={order}
             tableName={table.name}
-            loading={actionLoading}
+            loading={actionLoading || approvalLoading}
             sendingKitchen={sendingKitchen}
+            userRole={userRole}
             onQuantityChange={changeQuantity}
             onDeleteItem={deleteItem}
+            onCancelKitchenItem={handleCancelKitchenItemClick}
+            onOpenDiscountModal={() => { setDiscountError(null); setDiscountModalOpen(true); }}
             onSendKitchen={sendKitchen}
             onOpenTransferModal={() => setTransferModalOpen(true)}
             onCancelOrder={async () => {
               const ok = await cancelEmptyOrder();
               if (ok) onBackToTables();
             }}
+            onCancelOrderWithItems={handleCancelOrderWithItemsClick}
           />
         </Col>
       </Row>
@@ -199,7 +184,49 @@ export function OrderingView({
         allTables={allTables}
         loading={transferLoading}
         onClose={() => setTransferModalOpen(false)}
-        onConfirm={handleTransferMergeConfirm}
+        onConfirm={async (data) => {
+          setTransferLoading(true);
+          try {
+            const res = await fetch("/api/v1/tables/transfer", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(data),
+            });
+            const d = await res.json();
+            if (d.ok) {
+              message.success(data.loai === "CHUYEN" ? "Chuyển bàn thành công" : "Gộp bàn thành công");
+              setTransferModalOpen(false);
+              onTableStatusChanged();
+              onBackToTables();
+            } else {
+              message.error(d.error || "Không thể chuyển/gộp bàn");
+            }
+          } finally {
+            setTransferLoading(false);
+          }
+        }}
+      />
+
+      <ManagerApprovalModal
+        open={modalState.open}
+        title={modalState.title}
+        actionDescription={modalState.actionDescription}
+        isPinRequired={modalState.isPinRequired}
+        errorMessage={modalState.errorMessage}
+        lockoutUntil={modalState.lockoutUntil}
+        loading={approvalLoading}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+      />
+
+      <DiscountModal
+        open={discountModalOpen}
+        totalAmount={order?.totalAmount ?? 0}
+        isPinRequired={userRole !== "QUAN_LY"}
+        errorMessage={discountError}
+        loading={approvalLoading}
+        onConfirm={handleConfirmDiscount}
+        onCancel={() => setDiscountModalOpen(false)}
       />
     </div>
   );

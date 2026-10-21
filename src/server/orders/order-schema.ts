@@ -51,6 +51,8 @@ export const modifyOrderItemsSchema = z.object({
     .nullable(),
   toppingIds: z.array(z.coerce.number().int().positive()).optional(),
   items: z.array(orderItemInputSchema).optional(),
+  pinCode: z.string().optional(),
+  lyDo: z.string().max(255).optional(),
 });
 
 export const sendKitchenSchema = z.object({
