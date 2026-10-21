@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/server/auth/require-role";
-import {
-  getPrinterSettings,
-  isPrivateOrLoopbackIp,
-} from "@/server/printing/settings-service";
+import { getPrinterSettings } from "@/server/printing/settings-service";
+import { parsePrinterAddress } from "@/server/printing/printer-address-validator";
 import { compilePrintPayloadToEscpos } from "@/server/printing/render-engine";
 import { sendToPrinter } from "@/server/printing/tcp-printer";
 import type { KotPayload, FinalReceiptPayload } from "@/server/printing/print-payload-types";
@@ -39,9 +37,17 @@ export async function POST(req: NextRequest) {
     else targetIp = settings.receiptIp;
   }
 
-  if (!isPrivateOrLoopbackIp(targetIp)) {
+  if (!targetIp) {
     return NextResponse.json(
-      { ok: false, error: "Địa chỉ IP máy in không thuộc dải mạng LAN riêng hợp lệ" },
+      { ok: false, error: `Chưa cấu hình địa chỉ IP cho máy in ${target}` },
+      { status: 400 },
+    );
+  }
+
+  const parsedAddr = parsePrinterAddress(targetIp);
+  if (!parsedAddr.ok) {
+    return NextResponse.json(
+      { ok: false, error: `Địa chỉ máy in không hợp lệ: ${parsedAddr.error}` },
       { status: 400 },
     );
   }
@@ -97,22 +103,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Point 3: sendToPrinter receives cleanly separated host and port
     await sendToPrinter({
-      ip: targetIp,
-      port: 9100,
+      ip: parsedAddr.host,
+      port: parsedAddr.port,
       data: escposBytes,
       timeoutMs: 2000,
     });
 
     return NextResponse.json({
       ok: true,
-      message: `Đã gửi thành công trang in thử tới máy in ${target} (${targetIp})`,
+      message: `Đã gửi thành công trang in thử tới máy in ${target} (${parsedAddr.formatted})`,
     });
   } catch (error: any) {
     return NextResponse.json(
       {
         ok: false,
-        error: `Không thể in thử tới máy in ${target} (${targetIp}): ${error?.message || "Lỗi kết nối"}`,
+        error: `Không thể in thử tới máy in ${target} (${parsedAddr.formatted}): ${error?.message || "Lỗi kết nối"}`,
       },
       { status: 503 },
     );

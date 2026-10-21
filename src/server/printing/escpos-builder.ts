@@ -54,7 +54,9 @@ export class EscposBuilder {
   }
 
   /**
-   * Appends a raw raster bit image using ESC/POS standard "GS v 0" (0x1D 0x76 0x30).
+   * Appends raw raster bit image using ESC/POS standard "GS v 0" (0x1D 0x76 0x30).
+   * Automatically slices images into bands of max 256 rows per command (Point 7)
+   * to avoid silent truncation and buffer overflows on physical thermal printers.
    * @param widthDot Width in dots (must be divisible by 8)
    * @param heightDot Height in dots
    * @param rasterData 1-bit monochrome data (1 = dot printed, 0 = white)
@@ -71,26 +73,38 @@ export class EscposBuilder {
       );
     }
 
+    const MAX_BAND_HEIGHT = 256;
     const xL = widthBytes & 0xff;
     const xH = (widthBytes >> 8) & 0xff;
-    const yL = heightDot & 0xff;
-    const yH = (heightDot >> 8) & 0xff;
 
-    // GS v 0 m xL xH yL yH
-    const header = Buffer.from([0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
-    this.buffers.push(header, rasterData);
+    let processedRows = 0;
+    while (processedRows < heightDot) {
+      const currentBandHeight = Math.min(MAX_BAND_HEIGHT, heightDot - processedRows);
+      const startOffset = processedRows * widthBytes;
+      const endOffset = startOffset + currentBandHeight * widthBytes;
+      const bandData = rasterData.subarray(startOffset, endOffset);
+
+      const yL = currentBandHeight & 0xff;
+      const yH = (currentBandHeight >> 8) & 0xff;
+
+      // GS v 0 m xL xH yL yH
+      const header = Buffer.from([0x1d, 0x76, 0x30, 0x00, xL, xH, yL, yH]);
+      this.buffers.push(header, bandData);
+
+      processedRows += currentBandHeight;
+    }
+
     return this;
   }
 
   /**
-   * Executes paper cut (GS V m n: 0x42 = Partial cut with feed).
+   * Executes paper cut (GS V m n: 0x41 = Full cut, 0x42 = Partial cut).
+   * Fixed in Point 8 to properly use the calculated mode argument.
    * @param partial Whether to execute partial cut (default true)
    */
   cut(partial = true): this {
-    // 0x1D 0x56 0x42 0x00: GS V B 0 (feeds paper and partial cuts)
-    // 0x1D 0x56 0x41 0x00: GS V A 0 (feeds paper and full cuts)
     const mode = partial ? 0x42 : 0x41;
-    this.buffers.push(Buffer.from([0x1d, 0x56, 0x42, 0x00]));
+    this.buffers.push(Buffer.from([0x1d, 0x56, mode, 0x00]));
     return this;
   }
 
@@ -98,24 +112,16 @@ export class EscposBuilder {
    * Sends cash drawer kick pulse (ESC p m t1 t2).
    * DEC-11: Activates drawer solenoid on standard RJ12 connector.
    * @param pin 0 = Pin 2, 1 = Pin 5 (default 0)
-   * @param t1 Pulse ON time * 2ms (0x19 = 25 -> 50ms)
-   * @param t2 Pulse OFF time * 2ms (0xFA = 250 -> 500ms)
+   * @param t1 On-time pulse duration (default 25 * 2ms = 50ms)
+   * @param t2 Off-time pulse duration (default 250 * 2ms = 500ms)
    */
-  drawerKick(pin: 0 | 1 = 0, t1 = 0x19, t2 = 0xfa): this {
+  drawerKick(pin = 0, t1 = 0x19, t2 = 0xfa): this {
     this.buffers.push(Buffer.from([0x1b, 0x70, pin, t1, t2]));
     return this;
   }
 
   /**
-   * Appends raw buffer.
-   */
-  raw(buffer: Buffer): this {
-    this.buffers.push(buffer);
-    return this;
-  }
-
-  /**
-   * Compiles all queued commands into a single contiguous Buffer.
+   * Concatenates all command buffers into a single binary Buffer.
    */
   build(): Buffer {
     return Buffer.concat(this.buffers);

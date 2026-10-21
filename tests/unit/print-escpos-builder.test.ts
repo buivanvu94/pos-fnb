@@ -8,10 +8,14 @@ describe("EscposBuilder Unit Tests", () => {
     expect(buf).toEqual(Buffer.from([0x1b, 0x40]));
   });
 
-  it("generates correct GS V paper cut command", () => {
-    const builder = new EscposBuilder();
-    const buf = builder.cut().build();
-    expect(buf).toEqual(Buffer.from([0x1d, 0x56, 0x42, 0x00]));
+  it("generates correct GS V paper cut command for partial (0x42) and full (0x41) cut (Point 8)", () => {
+    const builderPartial = new EscposBuilder();
+    const bufPartial = builderPartial.cut(true).build();
+    expect(bufPartial).toEqual(Buffer.from([0x1d, 0x56, 0x42, 0x00]));
+
+    const builderFull = new EscposBuilder();
+    const bufFull = builderFull.cut(false).build();
+    expect(bufFull).toEqual(Buffer.from([0x1d, 0x56, 0x41, 0x00]));
   });
 
   it("generates correct ESC p cash drawer kick command (DEC-11)", () => {
@@ -58,6 +62,49 @@ describe("EscposBuilder Unit Tests", () => {
       Buffer.from([0x1d, 0x76, 0x30, 0x00, 48, 0, 20, 0]),
     );
     expect(buf58.subarray(8)).toEqual(data58);
+  });
+
+  it("slices large raster image (3000 rows) into bands of max 256 rows, summing to 3000 rows (Point 7)", () => {
+    const widthDot = 576; // 72 bytes per row
+    const widthBytes = widthDot / 8;
+    const totalHeight = 3000;
+    const data = Buffer.alloc(widthBytes * totalHeight, 0x55);
+
+    const builder = new EscposBuilder();
+    const bytes = builder.rasterImage(widthDot, totalHeight, data).build();
+
+    // Parse all GS v 0 headers in output
+    let offset = 0;
+    let totalRowsCounted = 0;
+    let chunkCount = 0;
+
+    while (offset < bytes.length) {
+      // Must start with GS v 0 0x00
+      expect(bytes.subarray(offset, offset + 4)).toEqual(Buffer.from([0x1d, 0x76, 0x30, 0x00]));
+
+      const xL = bytes[offset + 4];
+      const xH = bytes[offset + 5];
+      const wBytes = xL | (xH << 8);
+      expect(wBytes).toBe(widthBytes);
+
+      const yL = bytes[offset + 6];
+      const yH = bytes[offset + 7];
+      const bandHeight = yL | (yH << 8);
+
+      expect(bandHeight).toBeLessThanOrEqual(256);
+      expect(bandHeight).toBeGreaterThan(0);
+
+      totalRowsCounted += bandHeight;
+      chunkCount++;
+
+      const payloadLength = wBytes * bandHeight;
+      offset += 8 + payloadLength;
+    }
+
+    expect(totalRowsCounted).toBe(3000);
+    // 3000 / 256 = 11.71 -> 12 chunks (11 chunks of 256 + 1 chunk of 184)
+    expect(chunkCount).toBe(12);
+    expect(offset).toBe(bytes.length);
   });
 
   it("throws on invalid width or data length mismatch", () => {

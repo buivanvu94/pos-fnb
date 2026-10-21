@@ -85,10 +85,11 @@ export async function POST(req: NextRequest) {
     await fs.writeFile(targetFilePath, buffer);
 
     const publicUrl = `/api/v1/settings/logo/${safeFilename}`;
-    await savePrinterSettings({ storeLogo: targetFilePath });
+    // Point 6: store only the generated filename, not an absolute filesystem path
+    await savePrinterSettings({ storeLogo: safeFilename });
 
     return NextResponse.json(
-      { ok: true, data: { url: publicUrl, filename: safeFilename, path: targetFilePath } },
+      { ok: true, data: { url: publicUrl, filename: safeFilename } },
       { status: 201 },
     );
   } catch (error) {

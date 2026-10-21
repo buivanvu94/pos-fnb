@@ -8,8 +8,10 @@ export interface SendToPrinterOptions {
 }
 
 /**
- * Sends ESC/POS byte buffers to a network thermal printer over raw TCP (port 9100).
- * Enforces a strict 2000ms connection & write timeout (NFR-02, ERR-06).
+ * Sends ESC/POS byte buffers to a network thermal printer over raw TCP.
+ * Enforces strict connection & write timeout (2000ms).
+ * Resolves promptly as soon as socket.write callback reports success
+ * without waiting for remote FIN/close (Point 4).
  */
 export async function sendToPrinter({
   ip,
@@ -32,7 +34,7 @@ export async function sendToPrinter({
     const cleanupAndResolve = () => {
       if (!settled) {
         settled = true;
-        socket.destroy();
+        socket.end();
         resolve();
       }
     };
@@ -54,14 +56,10 @@ export async function sendToPrinter({
         if (writeErr) {
           cleanupAndReject(writeErr);
         } else {
-          // Allow printer buffer to flush before closing socket
-          socket.end();
+          // Point 4: resolve immediately upon write completion
+          cleanupAndResolve();
         }
       });
-    });
-
-    socket.on("close", () => {
-      cleanupAndResolve();
     });
   });
 }

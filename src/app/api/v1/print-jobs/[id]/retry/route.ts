@@ -12,6 +12,8 @@ interface RouteParams {
 /**
  * POST /api/v1/print-jobs/:id/retry (AC-03-2, BR-12)
  * Retries a previously failed thermal print job.
+ * Point 2: Only FAILED jobs can be retried (409 for other statuses).
+ * PHUC_VU can only retry kitchen/bar tickets; QUAN_LY and THU_NGAN can retry all.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const auth = await requireRole(req);
@@ -39,6 +41,30 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       { ok: false, error: "Không tìm thấy lệnh in" },
       { status: 404 },
     );
+  }
+
+  // Point 2: Only allow retrying jobs with FAILED status
+  if (job.status !== "FAILED") {
+    return NextResponse.json(
+      { ok: false, error: `Không thể thử in lại lệnh in ở trạng thái ${job.status} (chỉ cho phép FAILED)` },
+      { status: 409 },
+    );
+  }
+
+  // Point 2: PHUC_VU can only retry kitchen/bar tickets
+  if (auth.user.role === "PHUC_VU") {
+    const isKitchenOrBar =
+      job.targetPrinter === "KITCHEN" ||
+      job.targetPrinter === "BAR" ||
+      job.jobType === "KOT_KITCHEN" ||
+      job.jobType === "KOT_BAR";
+
+    if (!isKitchenOrBar) {
+      return NextResponse.json(
+        { ok: false, error: "Nhân viên phục vụ chỉ được phép thử in lại phiếu bếp hoặc phiếu pha chế" },
+        { status: 403 },
+      );
+    }
   }
 
   try {

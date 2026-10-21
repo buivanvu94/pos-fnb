@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, inArray } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import { GET as getSettingsHandler, PUT as putSettingsHandler } from "@/app/api/v1/settings/printers/route";
+import { savePrinterSettings } from "@/server/printing/settings-service";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { getTestDbUrl } from "../setup/test-config";
 
@@ -52,13 +53,19 @@ describe("Printer & Store Settings API (Anti-SSRF & RBAC)", () => {
   afterAll(async () => {
     if (db) {
       await db.delete(schema.users).where(inArray(schema.users.id, [managerUserId, cashierUserId, waiterUserId]));
+      // Point 10: Restore settings
+      await savePrinterSettings({
+        kitchenIp: "",
+        barIp: "",
+        receiptIp: "",
+      });
     }
     await pool.end();
   });
 
-  it("GET /api/v1/settings/printers: returns printer settings for authenticated user", async () => {
+  it("GET /api/v1/settings/printers: QUAN_LY receives full printer and network configuration", async () => {
     const req = new NextRequest("http://localhost:3000/api/v1/settings/printers", {
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
     });
     const res = await getSettingsHandler(req);
     expect(res.status).toBe(200);
@@ -66,6 +73,26 @@ describe("Printer & Store Settings API (Anti-SSRF & RBAC)", () => {
     expect(json.ok).toBe(true);
     expect(json.data.kitchenIp).toBeDefined();
     expect(json.data.paperWidth).toBeDefined();
+    expect(json.data.storeName).toBeDefined();
+  });
+
+  it("GET /api/v1/settings/printers: non-manager (PHUC_VU) receives only public UI metadata (Point 6)", async () => {
+    const req = new NextRequest("http://localhost:3000/api/v1/settings/printers", {
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+    });
+    const res = await getSettingsHandler(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(json.data.paperWidth).toBeDefined();
+    expect(json.data.drawerEnabled).toBeDefined();
+    expect(json.data.storeName).toBeDefined();
+    // Sensitive fields must be omitted
+    expect(json.data.kitchenIp).toBeUndefined();
+    expect(json.data.barIp).toBeUndefined();
+    expect(json.data.receiptIp).toBeUndefined();
+    expect(json.data.wifiPassword).toBeUndefined();
+    expect(json.data.storeLogo).toBeUndefined();
   });
 
   it("PUT /api/v1/settings/printers: blocks THU_NGAN with 403 Forbidden", async () => {

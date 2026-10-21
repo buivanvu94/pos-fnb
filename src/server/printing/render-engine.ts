@@ -1,3 +1,4 @@
+import path from "path";
 import type { Canvas } from "@napi-rs/canvas";
 import type { PrintPayload } from "./print-payload-types";
 import { EscposBuilder } from "./escpos-builder";
@@ -22,7 +23,16 @@ export async function renderPayloadToCanvas(
   paperWidth: PaperWidth = 80,
 ): Promise<Canvas> {
   const width = getDotWidth(paperWidth);
-  const p = payload as Record<string, any>;
+  const p = { ...(payload as Record<string, any>) };
+
+  // Point 6: Resolve store logo filepath from filename
+  if (p.storeLogo && !p.storeLogoPath) {
+    p.storeLogoPath = path.isAbsolute(p.storeLogo)
+      ? p.storeLogo
+      : path.join(process.cwd(), "uploads", "logo", p.storeLogo);
+  } else if (p.storeLogoPath && !path.isAbsolute(p.storeLogoPath)) {
+    p.storeLogoPath = path.join(process.cwd(), "uploads", "logo", p.storeLogoPath);
+  }
 
   // Normalize Phase 03 cash receipts without explicit 'kind'
   const kind = p.kind || (p.entryType ? "CASH_RECEIPT" : "");
@@ -40,8 +50,11 @@ export async function renderPayloadToCanvas(
       return renderCashReceiptCanvas(p as any, width);
     case "Z_REPORT":
       return renderZReportCanvas(p as any, width);
-    default:
-      throw new Error(`Unsupported print payload kind: ${kind || JSON.stringify(payload)}`);
+    default: {
+      // Point 9: Truncate error message from dumping huge JSON payload
+      const previewStr = kind || JSON.stringify(payload).slice(0, 500);
+      throw new Error(`Unsupported print payload kind: ${previewStr}`);
+    }
   }
 }
 

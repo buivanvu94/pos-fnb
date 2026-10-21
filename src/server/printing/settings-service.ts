@@ -1,6 +1,8 @@
 import { inArray } from "drizzle-orm";
+import path from "path";
 import { db } from "@/db";
 import { settings } from "@/db/schema";
+import { parsePrinterAddress, isValidPrinterAddress } from "./printer-address-validator";
 
 export interface PrinterSettings {
   kitchenIp: string;
@@ -32,36 +34,14 @@ export const SETTING_KEYS = {
   DRAWER_ENABLED: "drawer.enabled",
 } as const;
 
+export const LOGO_FILENAME_REGEX = /^\d+-[0-9a-f]{12}\.(png|jpg)$/;
+
 /**
  * Validates whether an IP address belongs to RFC 1918 private ranges or Loopback (anti-SSRF).
- * Accepts standard IPv4 or host:port where host is RFC1918 / Loopback.
+ * Delegated to central parsePrinterAddress validator (Point 3).
  */
 export function isPrivateOrLoopbackIp(rawIp: string): boolean {
-  if (!rawIp) return false;
-  const host = rawIp.trim().split(":")[0];
-  if (host === "localhost") return true;
-  const parts = host.split(".");
-  if (parts.length !== 4) return false;
-
-  const nums = parts.map((p) => {
-    if (!/^\d+$/.test(p)) return -1;
-    const n = Number(p);
-    return n >= 0 && n <= 255 ? n : -1;
-  });
-
-  if (nums.some((n) => n === -1)) return false;
-  const [a, b] = nums;
-
-  // Loopback (127.0.0.0/8)
-  if (a === 127) return true;
-  // Class A private (10.0.0.0/8)
-  if (a === 10) return true;
-  // Class B private (172.16.0.0/12: 172.16.0.0 - 172.31.255.255)
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  // Class C private (192.168.0.0/16)
-  if (a === 192 && b === 168) return true;
-
-  return false;
+  return isValidPrinterAddress(rawIp);
 }
 
 export async function getPrinterSettings(): Promise<PrinterSettings> {
@@ -79,28 +59,18 @@ export async function getPrinterSettings(): Promise<PrinterSettings> {
   const paperWidthRaw = Number(map.get(SETTING_KEYS.PAPER_WIDTH));
   const paperWidth: 80 | 58 = paperWidthRaw === 58 ? 58 : 80;
 
+  // Point 5: Removed hardcoded default IPs and Wi-Fi password. Default is empty string "".
   return {
-    kitchenIp:
-      map.get(SETTING_KEYS.KITCHEN_IP) ||
-      process.env.PRINTER_KITCHEN_IP ||
-      "192.168.1.200",
-    barIp:
-      map.get(SETTING_KEYS.BAR_IP) ||
-      process.env.PRINTER_BAR_IP ||
-      "192.168.1.201",
-    receiptIp:
-      map.get(SETTING_KEYS.RECEIPT_IP) ||
-      process.env.PRINTER_RECEIPT_IP ||
-      "192.168.1.202",
+    kitchenIp: map.get(SETTING_KEYS.KITCHEN_IP) || process.env.PRINTER_KITCHEN_IP || "",
+    barIp: map.get(SETTING_KEYS.BAR_IP) || process.env.PRINTER_BAR_IP || "",
+    receiptIp: map.get(SETTING_KEYS.RECEIPT_IP) || process.env.PRINTER_RECEIPT_IP || "",
     paperWidth,
     storeName: map.get(SETTING_KEYS.STORE_NAME) || "POS Cafe & Restaurant",
-    storeAddress:
-      map.get(SETTING_KEYS.STORE_ADDRESS) ||
-      "123 Đường Nguyễn Huệ, Quận 1, TP.HCM",
+    storeAddress: map.get(SETTING_KEYS.STORE_ADDRESS) || "123 Đường Nguyễn Huệ, Quận 1, TP.HCM",
     storePhone: map.get(SETTING_KEYS.STORE_PHONE) || "0901234567",
     storeLogo: map.get(SETTING_KEYS.STORE_LOGO) || "",
-    wifiSsid: map.get(SETTING_KEYS.WIFI_SSID) || "POS_FREE_WIFI",
-    wifiPassword: map.get(SETTING_KEYS.WIFI_PASSWORD) || "12345678",
+    wifiSsid: map.get(SETTING_KEYS.WIFI_SSID) || "",
+    wifiPassword: map.get(SETTING_KEYS.WIFI_PASSWORD) || "",
     wifiSecurity: map.get(SETTING_KEYS.WIFI_SECURITY) || "WPA",
     drawerEnabled: map.get(SETTING_KEYS.DRAWER_ENABLED) !== "false",
   };
@@ -133,7 +103,9 @@ export async function savePrinterSettings(
     entries.push({ key: SETTING_KEYS.STORE_PHONE, value: partial.storePhone });
   }
   if (partial.storeLogo !== undefined) {
-    entries.push({ key: SETTING_KEYS.STORE_LOGO, value: partial.storeLogo });
+    // Point 6: store only the basename/filename
+    const cleanLogoName = partial.storeLogo ? path.basename(partial.storeLogo) : "";
+    entries.push({ key: SETTING_KEYS.STORE_LOGO, value: cleanLogoName });
   }
   if (partial.wifiSsid !== undefined) {
     entries.push({ key: SETTING_KEYS.WIFI_SSID, value: partial.wifiSsid });

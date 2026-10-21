@@ -1,31 +1,39 @@
+import fs from "fs";
+import path from "path";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/server/auth/require-role";
 import {
   getPrinterSettings,
   savePrinterSettings,
-  isPrivateOrLoopbackIp,
+  LOGO_FILENAME_REGEX,
 } from "@/server/printing/settings-service";
+import { parsePrinterAddress } from "@/server/printing/printer-address-validator";
+
+function validateOptionalPrinterIp(ip: string | undefined): boolean {
+  if (!ip || ip.trim() === "") return true;
+  return parsePrinterAddress(ip.trim()).ok;
+}
 
 const updatePrintersSchema = z.object({
   kitchenIp: z
     .string()
     .trim()
-    .refine((ip) => isPrivateOrLoopbackIp(ip), {
+    .refine(validateOptionalPrinterIp, {
       message: "IP máy in bếp không hợp lệ hoặc nằm ngoài dải mạng riêng (RFC1918 / Loopback) nhằm chống SSRF",
     })
     .optional(),
   barIp: z
     .string()
     .trim()
-    .refine((ip) => isPrivateOrLoopbackIp(ip), {
+    .refine(validateOptionalPrinterIp, {
       message: "IP máy in bar không hợp lệ hoặc nằm ngoài dải mạng riêng (RFC1918 / Loopback) nhằm chống SSRF",
     })
     .optional(),
   receiptIp: z
     .string()
     .trim()
-    .refine((ip) => isPrivateOrLoopbackIp(ip), {
+    .refine(validateOptionalPrinterIp, {
       message: "IP máy in hóa đơn không hợp lệ hoặc nằm ngoài dải mạng riêng (RFC1918 / Loopback) nhằm chống SSRF",
     })
     .optional(),
@@ -38,7 +46,21 @@ const updatePrintersSchema = z.object({
   storeName: z.string().max(255).optional(),
   storeAddress: z.string().max(255).optional(),
   storePhone: z.string().max(50).optional(),
-  storeLogo: z.string().max(255).optional(),
+  storeLogo: z
+    .string()
+    .trim()
+    .refine(
+      (val) => {
+        if (!val) return true;
+        if (!LOGO_FILENAME_REGEX.test(val)) return false;
+        const fullPath = path.join(process.cwd(), "uploads", "logo", val);
+        return fs.existsSync(fullPath);
+      },
+      {
+        message: "Tên file logo không hợp lệ hoặc file không tồn tại trong thư mục uploads/logo",
+      },
+    )
+    .optional(),
   wifiSsid: z.string().max(100).optional(),
   wifiPassword: z.string().max(100).optional(),
   wifiSecurity: z.string().max(50).optional(),
@@ -47,7 +69,8 @@ const updatePrintersSchema = z.object({
 
 /**
  * GET /api/v1/settings/printers
- * Returns current printing and store configuration.
+ * Returns printing and store configuration.
+ * Point 6: QUAN_LY sees all. Other roles receive only public store metadata.
  */
 export async function GET(req: NextRequest) {
   const auth = await requireRole(req);
@@ -57,6 +80,19 @@ export async function GET(req: NextRequest) {
 
   try {
     const settings = await getPrinterSettings();
+
+    // Point 6: Non-managers only receive non-sensitive UI settings
+    if (auth.user.role !== "QUAN_LY") {
+      return NextResponse.json({
+        ok: true,
+        data: {
+          paperWidth: settings.paperWidth,
+          drawerEnabled: settings.drawerEnabled,
+          storeName: settings.storeName,
+        },
+      });
+    }
+
     return NextResponse.json({ ok: true, data: settings });
   } catch (error) {
     console.error("Failed to get printer settings:", error);
@@ -70,7 +106,6 @@ export async function GET(req: NextRequest) {
 /**
  * PUT /api/v1/settings/printers
  * Updates printer and store configuration. Only QUAN_LY is authorized.
- * Strictly verifies IPv4 addresses against RFC1918 / Loopback to block SSRF.
  */
 export async function PUT(req: NextRequest) {
   const auth = await requireRole(req, "QUAN_LY");
@@ -99,9 +134,9 @@ export async function PUT(req: NextRequest) {
     const updated = await savePrinterSettings(parsed.data);
     return NextResponse.json({ ok: true, data: updated });
   } catch (error) {
-    console.error("Failed to update printer settings:", error);
+    console.error("Failed to save printer settings:", error);
     return NextResponse.json(
-      { ok: false, error: "Lỗi máy chủ khi cập nhật cấu hình máy in" },
+      { ok: false, error: "Lỗi máy chủ khi lưu cấu hình máy in" },
       { status: 500 },
     );
   }

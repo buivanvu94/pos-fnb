@@ -1,21 +1,29 @@
 import { compilePrintPayloadToEscpos } from "../src/server/printing/render-engine";
 import { sendToPrinter } from "../src/server/printing/tcp-printer";
+import { parsePrinterAddress } from "../src/server/printing/printer-address-validator";
 import type { KotPayload, FinalReceiptPayload } from "../src/server/printing/print-payload-types";
 
 async function main() {
   const args = process.argv.slice(2);
-  const ip = args[0];
+  const ipArg = args[0];
   const target = args[1]?.toLowerCase();
 
-  if (!ip || !target || !["kitchen", "bar", "receipt"].includes(target)) {
-    console.error("Cách sử dụng: npm run print:test -- <ip> <kitchen|bar|receipt>");
+  if (!ipArg || !target || !["kitchen", "bar", "receipt"].includes(target)) {
+    console.error("Cách sử dụng: npm run print:test -- <ip[:port]> <kitchen|bar|receipt>");
     console.error("Ví dụ: npm run print:test -- 192.168.1.200 kitchen");
+    console.error("Ví dụ: npm run print:test -- 192.168.1.200:9101 kitchen");
     console.error("Ví dụ: npm run print:test -- 192.168.1.202 receipt");
     process.exit(1);
   }
 
+  const parsed = parsePrinterAddress(ipArg);
+  if (!parsed.ok) {
+    console.error(`✗ Địa chỉ máy in không hợp lệ: ${parsed.error}`);
+    process.exit(1);
+  }
+
   console.log(`=== BẮT ĐẦU IN THỬ NGHIỆM TỚI MÁY IN ${target.toUpperCase()} ===`);
-  console.log(`IP máy in: ${ip}:9100`);
+  console.log(`Địa chỉ máy in: ${parsed.formatted}`);
 
   let escposBytes: Buffer;
 
@@ -68,11 +76,11 @@ async function main() {
   }
 
   console.log(`Đã biên dịch xong ${escposBytes.length} bytes ESC/POS.`);
-  console.log("Đang gửi qua socket TCP:9100...");
+  console.log(`Đang gửi qua socket TCP tới ${parsed.formatted}...`);
 
   await sendToPrinter({
-    ip,
-    port: 9100,
+    ip: parsed.host,
+    port: parsed.port,
     data: escposBytes,
     timeoutMs: 3000,
   });

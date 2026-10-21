@@ -27,11 +27,14 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
   let testShiftId: number;
   let testMenuItemId: number;
 
+  const createdJobIds: number[] = [];
+
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
 
-    // 1. Start mock TCP socket server
+    // 1. Start mock TCP socket server on restricted printer port 9104
+    mockPort = 9104;
     await new Promise<void>((resolve) => {
       mockServer = net.createServer((socket) => {
         socket.on("data", (chunk) => {
@@ -41,9 +44,7 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
           socket.end();
         });
       });
-      mockServer.listen(0, "127.0.0.1", () => {
-        const addr = mockServer.address() as net.AddressInfo;
-        mockPort = addr.port;
+      mockServer.listen(mockPort, "127.0.0.1", () => {
         resolve();
       });
     });
@@ -105,6 +106,9 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
       await new Promise<void>((resolve) => mockServer.close(() => resolve()));
     }
     if (db) {
+      if (createdJobIds.length > 0) {
+        await db.delete(schema.printJobs).where(inArray(schema.printJobs.id, createdJobIds));
+      }
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, testMenuItemId));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, testShiftId));
       await db.delete(schema.menuItems).where(eq(schema.menuItems.id, testMenuItemId));
@@ -112,6 +116,13 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
       await db.delete(schema.tables).where(eq(schema.tables.id, testTableId));
       await db.delete(schema.areas).where(eq(schema.areas.id, testAreaId));
       await db.delete(schema.users).where(eq(schema.users.id, testUserId));
+
+      // Point 10: Restore settings
+      await savePrinterSettings({
+        kitchenIp: "",
+        barIp: "",
+        receiptIp: "",
+      });
     }
     await pool.end();
   });
@@ -184,6 +195,7 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
         items: [{ name: "Món in lại", quantity: 1, unitPrice: 50000 }],
       },
     });
+    createdJobIds.push(failedJob.id);
 
     await db
       .update(schema.printJobs)

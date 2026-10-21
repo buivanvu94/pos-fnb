@@ -17,10 +17,6 @@ export type SendKitchenResult =
           kitchen: any[];
           bar: any[];
         };
-        printWarning?: {
-          message: string;
-          failedJobs: Array<{ id: number; error: string }>;
-        };
       };
       printWarning?: {
         message: string;
@@ -28,6 +24,52 @@ export type SendKitchenResult =
       };
     }
   | { ok: false; error: string; status: number };
+
+/**
+ * Deduplicated helper to enqueue a single station's ticket within transaction (Point 10).
+ */
+async function enqueueStationTicket(
+  tx: any,
+  orderId: number,
+  orderCode: string,
+  tableName: string,
+  senderName: string,
+  now: Date,
+  station: "KITCHEN" | "BAR",
+  items: Array<{ name: string | null; quantity: number; notes: string | null; unitPrice: number }>,
+): Promise<number | null> {
+  if (items.length === 0) return null;
+
+  const jobType = station === "BAR" ? "KOT_BAR" : "KOT_KITCHEN";
+  const defaultName = station === "BAR" ? "Đồ uống" : "Món ăn";
+
+  const payload: KotPayload = {
+    kind: "KOT",
+    orderId,
+    orderCode,
+    tableName,
+    senderName,
+    sentAt: now.toISOString(),
+    targetStation: station,
+    items: items.map((i) => ({
+      name: i.name || defaultName,
+      quantity: i.quantity,
+      notes: i.notes,
+      unitPrice: i.unitPrice,
+    })),
+  };
+
+  const job = await enqueuePrintJob(
+    {
+      orderId,
+      jobType,
+      targetPrinter: station,
+      payload,
+    },
+    tx,
+  );
+  return job.id;
+}
 
 /**
  * Marks unprinted order items as sent to kitchen and groups them by station (FR-03).
@@ -109,7 +151,6 @@ export async function sendKitchenOrder(
       const kitchenItems = unprintedItems.filter((i) => (i.targetPrinter ?? "KITCHEN") === "KITCHEN");
       const barItems = unprintedItems.filter((i) => (i.targetPrinter ?? "KITCHEN") === "BAR");
 
-      // Query table name if available
       let tableName = "Mang về";
       if (order.tableId) {
         const [tableRow] = await tx
@@ -122,67 +163,15 @@ export async function sendKitchenOrder(
         }
       }
 
+      const effectiveSender = senderName || "Nhân viên phục vụ";
       const jobIds: number[] = [];
 
-      // Enqueue Kitchen ticket if items exist
-      if (kitchenItems.length > 0) {
-        const kitchenPayload: KotPayload = {
-          kind: "KOT",
-          orderId,
-          orderCode: order.orderCode,
-          tableName,
-          senderName: senderName || "Nhân viên phục vụ",
-          sentAt: now.toISOString(),
-          targetStation: "KITCHEN",
-          items: kitchenItems.map((i) => ({
-            name: i.name || "Món ăn",
-            quantity: i.quantity,
-            notes: i.notes,
-            unitPrice: i.unitPrice,
-          })),
-        };
+      // Enqueue Kitchen and Bar using unified helper (Point 10)
+      const kId = await enqueueStationTicket(tx, orderId, order.orderCode, tableName, effectiveSender, now, "KITCHEN", kitchenItems);
+      if (kId !== null) jobIds.push(kId);
 
-        const kJob = await enqueuePrintJob(
-          {
-            orderId,
-            jobType: "KOT_KITCHEN",
-            targetPrinter: "KITCHEN",
-            payload: kitchenPayload,
-          },
-          tx,
-        );
-        jobIds.push(kJob.id);
-      }
-
-      // Enqueue Bar ticket if items exist
-      if (barItems.length > 0) {
-        const barPayload: KotPayload = {
-          kind: "KOT",
-          orderId,
-          orderCode: order.orderCode,
-          tableName,
-          senderName: senderName || "Nhân viên phục vụ",
-          sentAt: now.toISOString(),
-          targetStation: "BAR",
-          items: barItems.map((i) => ({
-            name: i.name || "Đồ uống",
-            quantity: i.quantity,
-            notes: i.notes,
-            unitPrice: i.unitPrice,
-          })),
-        };
-
-        const bJob = await enqueuePrintJob(
-          {
-            orderId,
-            jobType: "KOT_BAR",
-            targetPrinter: "BAR",
-            payload: barPayload,
-          },
-          tx,
-        );
-        jobIds.push(bJob.id);
-      }
+      const bId = await enqueueStationTicket(tx, orderId, order.orderCode, tableName, effectiveSender, now, "BAR", barItems);
+      if (bId !== null) jobIds.push(bId);
 
       return {
         jobIds,
@@ -204,19 +193,41 @@ export async function sendKitchenOrder(
     throw err;
   }
 
-  // Dispatch queued print jobs outside transaction (after commit)
+  // Point 1: Dispatch simultaneously via Promise.allSettled with complete failure isolation (NFR-02)
   const failedJobs: Array<{ id: number; error: string }> = [];
 
-  for (const jId of createdJobIds) {
-    const dispatchRes = await dispatchPrintJob(jId);
-    if (!dispatchRes.ok) {
-      failedJobs.push({
+  const dispatchPromises = createdJobIds.map(async (jId) => {
+    try {
+      const dispatchRes = await dispatchPrintJob(jId);
+      if (!dispatchRes.ok && dispatchRes.status !== "ALREADY_HANDLED") {
+        return {
+          id: jId,
+          error: dispatchRes.error || ERROR_CATALOG.ERR_06.message,
+        };
+      }
+      return null;
+    } catch (dispatchErr: any) {
+      console.error(`Unexpected error dispatching job ${jId}:`, dispatchErr);
+      return {
         id: jId,
-        error: dispatchRes.error || ERROR_CATALOG.ERR_06.message,
+        error: dispatchErr?.message || ERROR_CATALOG.ERR_06.message,
+      };
+    }
+  });
+
+  const settledResults = await Promise.allSettled(dispatchPromises);
+  for (const outcome of settledResults) {
+    if (outcome.status === "fulfilled" && outcome.value !== null) {
+      failedJobs.push(outcome.value);
+    } else if (outcome.status === "rejected") {
+      failedJobs.push({
+        id: -1,
+        error: ERROR_CATALOG.ERR_06.message,
       });
     }
   }
 
+  // Point 10: printWarning returned only at top-level result
   const printWarning =
     failedJobs.length > 0
       ? {
@@ -232,7 +243,6 @@ export async function sendKitchenOrder(
       orderCode: txResult.orderCode,
       sentAt: txResult.sentAt,
       items: txResult.items,
-      ...(printWarning ? { printWarning } : {}),
     },
     ...(printWarning ? { printWarning } : {}),
   };

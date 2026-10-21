@@ -12,6 +12,7 @@ import { POST as kitchenPrintHandler } from "@/app/api/v1/orders/kitchen-print/r
 import { POST as retryPrintJobHandler } from "@/app/api/v1/print-jobs/[id]/retry/route";
 import { GET as listPrintJobsHandler } from "@/app/api/v1/print-jobs/route";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
+import { savePrinterSettings } from "@/server/printing/settings-service";
 
 describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)", () => {
   const testDbUrl = getTestDbUrl();
@@ -63,7 +64,8 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
         set: { value: "127.0.0.1" },
       });
 
-    // Start local mock TCP server on random available port
+    // Start local mock TCP server on port 9103
+    mockPort = 9103;
     await new Promise<void>((resolve) => {
       mockServer = net.createServer((socket) => {
         socket.on("data", (chunk) => {
@@ -73,9 +75,7 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
           socket.end();
         });
       });
-      mockServer.listen(0, "127.0.0.1", () => {
-        const addr = mockServer.address() as net.AddressInfo;
-        mockPort = addr.port;
+      mockServer.listen(mockPort, "127.0.0.1", () => {
         resolve();
       });
     });
@@ -152,6 +152,10 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
       }
       await db.delete(schema.areas).where(eq(schema.areas.id, testAreaId));
       await db.delete(schema.users).where(inArray(schema.users.id, [waiterUserId, managerUserId]));
+
+      // Point 10: Clean up printJobs and restore settings
+      await db.delete(schema.printJobs).where(inArray(schema.printJobs.targetPrinter, ["KITCHEN", "BAR", "RECEIPT"]));
+      await savePrinterSettings({ kitchenIp: "", barIp: "", receiptIp: "" });
     }
     await pool.end();
   });
