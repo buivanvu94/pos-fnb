@@ -5,6 +5,7 @@ import { shifts, cashEntries, printJobs } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { getShiftCashBalance } from "@/server/shifts/cash-balance";
+import { dispatchPrintJob } from "@/server/printing/print-service";
 
 const MAX_MONEY = 2_000_000_000;
 
@@ -30,6 +31,7 @@ class CashTransactionError extends Error {
  * - Checks that expectedCash does not overflow 2,000,000,000.
  * - Atomically inserts cash_entry, queues print_job ('CASH_RECEIPT', 'PENDING'),
  *   and updates shifts.expected_cash in the same database transaction.
+ * - Dispatches thermal print job after commit without failing business request (DEC-11).
  */
 export async function POST(req: NextRequest) {
   const auth = await requireRole(req, "QUAN_LY", "THU_NGAN");
@@ -145,23 +147,27 @@ export async function POST(req: NextRequest) {
         .returning();
 
       // b. Queue print job for thermal printer & cash drawer kick
-      await tx.insert(printJobs).values({
-        orderId: null,
-        jobType: "CASH_RECEIPT",
-        targetPrinter: "RECEIPT",
-        payload: JSON.stringify({
-          entryId: entry.id,
-          shiftId: activeShift.id,
-          shiftCode: activeShift.shiftCode,
-          entryType,
-          amount,
-          reason,
-          performedBy: user.userId,
-          performedByName: user.fullName,
-          timestamp: new Date().toISOString(),
-        }),
-        status: "PENDING",
-      });
+      const [job] = await tx
+        .insert(printJobs)
+        .values({
+          orderId: null,
+          jobType: "CASH_RECEIPT",
+          targetPrinter: "RECEIPT",
+          payload: JSON.stringify({
+            entryId: entry.id,
+            shiftId: activeShift.id,
+            shiftCode: activeShift.shiftCode,
+            entryType,
+            amount,
+            reason,
+            performedBy: user.userId,
+            performedByName: user.fullName,
+            timestamp: new Date().toISOString(),
+            kickDrawer: true,
+          }),
+          status: "PENDING",
+        })
+        .returning();
 
       // c. Recalculate theoretical cash balance per BR-05 within the transaction
       const balance = await getShiftCashBalance(
@@ -192,13 +198,25 @@ export async function POST(req: NextRequest) {
         entry,
         expectedCash: balance.expectedCash,
         breakdown: balance,
+        jobId: job?.id,
       };
     });
+
+    // Dispatch print job after commit; failures do not break the cash transaction response
+    if (result.jobId) {
+      dispatchPrintJob(result.jobId).catch((err) => {
+        console.error("Non-blocking cash receipt dispatch error:", err);
+      });
+    }
 
     return NextResponse.json(
       {
         ok: true,
-        data: result,
+        data: {
+          entry: result.entry,
+          expectedCash: result.expectedCash,
+          breakdown: result.breakdown,
+        },
       },
       { status: 201 },
     );

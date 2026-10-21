@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { App } from "antd";
+import React, { useState, useCallback } from "react";
+import { App, Button } from "antd";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 import type { MenuItemData } from "./menu-grid";
 
@@ -9,7 +9,7 @@ export function useOrderActions(
   fetchOrder: () => Promise<void>,
   onTableStatusChanged: () => void,
 ) {
-  const { message } = App.useApp();
+  const { message, notification } = App.useApp();
   const [actionLoading, setActionLoading] = useState(false);
   const [sendingKitchen, setSendingKitchen] = useState(false);
 
@@ -140,7 +140,38 @@ export function useOrderActions(
       });
       const data = await res.json();
       if (data.ok) {
-        message.success("Đã gửi thực đơn xuống Bếp/Bar thành công");
+        const warning = data.printWarning || data.data?.printWarning;
+        if (warning) {
+          const key = `print-warning-${Date.now()}`;
+          notification.warning({
+            key,
+            message: "Cảnh báo máy in",
+            description: warning.message,
+            duration: 0,
+            btn: React.createElement(
+              Button,
+              {
+                type: "primary",
+                size: "small",
+                onClick: async () => {
+                  try {
+                    const jobs = warning.failedJobs || [];
+                    for (const job of jobs) {
+                      await fetch(`/api/v1/print-jobs/${job.id}/retry`, { method: "POST" });
+                    }
+                    notification.destroy(key);
+                    message.success("Đã gửi yêu cầu thử in lại");
+                  } catch {
+                    message.error("Không thể thử in lại lúc này");
+                  }
+                },
+              },
+              "Thử in lại",
+            ),
+          });
+        } else {
+          message.success("Đã gửi thực đơn xuống Bếp/Bar thành công");
+        }
         await fetchOrder();
         onTableStatusChanged();
       } else {
@@ -152,7 +183,7 @@ export function useOrderActions(
     } finally {
       setSendingKitchen(false);
     }
-  }, [order, fetchOrder, onTableStatusChanged, message]);
+  }, [order, fetchOrder, onTableStatusChanged, message, notification]);
 
   const cancelEmptyOrder = useCallback(async () => {
     if (!order) return false;

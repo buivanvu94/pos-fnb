@@ -132,3 +132,39 @@ scripts/                  # Scripts tiện ích (seed-menu)
 
 - **Bảo vệ đường dẫn tĩnh & Ngăn chặn Bypass**:
   - Biểu thức chính quy bỏ qua asset tĩnh (ảnh, css, js) không bao giờ áp dụng cho các tiền tố `/api/*` và `/admin/*`, ngăn chặn triệt để hành vi bypass xác thực qua đuôi file.
+
+
+## 5. In ấn (Thermal Printing Architecture - Phase 05)
+
+Hệ thống in nhiệt mạng LAN theo chuẩn ESC/POS phục vụ in phiếu chế biến KOT, phiếu tạm tính, hóa đơn thanh toán, phiếu thu chi tiền mặt, báo cáo kết ca (Z-Report) và điều khiển kích xung mở két tiền (RJ12).
+
+### 5.1 Các tính năng & Quyết định cốt lõi
+- **Định tuyến Bếp & Quầy Bar độc lập (DEC-07)**:
+  - Khi nhân viên bấm "Gửi Bếp", hệ thống tự động tách danh sách món ăn chuyển tới máy in Bếp (`targetPrinter: "KITCHEN"`) và đồ uống chuyển tới máy in Bar (`targetPrinter: "BAR"`).
+  - Một lần gửi bếp tách tối đa 2 phiếu chế biến độc lập, chỉ chứa các món chưa gửi.
+- **Mở két tiền tự động RJ12 (DEC-11)**:
+  - Tự động kích xung điện `ESC p 0 25 250` tới máy in hóa đơn sau khi hoàn tất thanh toán (tiền mặt và VietQR) hoặc khi lập phiếu thu/chi tiền mặt.
+  - Có thể bật/tắt qua cờ cấu hình `drawer.enabled` trong bảng `settings`.
+- **Hóa đơn có Logo & QR Wi-Fi (DEC-13)**:
+  - In Logo quán ở đầu hóa đơn và in mã QR quét kết nối Wi-Fi miễn phí ở chân bill (`WIFI:S:<SSID>;T:<Security>;P:<Password>;;`).
+- **Khổ giấy tương thích (NFR-06)**:
+  - Hỗ trợ cả khổ 80mm (576 dots raster) và khổ 58mm (384 dots raster).
+- **Chống lỗi máy in làm gián đoạn nghiệp vụ (AC-03-2, BR-12)**:
+  - Hàng đợi `print_jobs` được ghi nhận `PENDING` ngay trong transaction nghiệp vụ; lệnh in được gửi sau khi transaction đã commit.
+  - Nếu máy in bị rút dây mạng hoặc kẹt giấy, đơn hàng vẫn được lưu 200 OK trên POS kèm cảnh báo `ERR-06`: *"Không thể kết nối tới máy in bếp. Vui lòng kiểm tra nguồn điện và dây mạng của máy in!"* và nút "Thử in lại" (`POST /api/v1/print-jobs/:id/retry`).
+- **Phòng chống SSRF trên cấu hình máy in**:
+  - API cài đặt máy in (`PUT /api/v1/settings/printers`) chỉ dành cho `QUAN_LY`, kiểm soát nghiêm ngặt địa chỉ IP thuộc các dải mạng riêng hợp lệ (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` và Loopback `127.0.0.0/8`), từ chối mọi IP công cộng nhằm ngăn chặn tấn công SSRF.
+
+### 5.2 Scripts kiểm thử & Xem trước
+- **Xem trước bản in (PNG)**:
+  ```bash
+  npm run print:preview
+  ```
+  Tạo tự động 12 file ảnh xem trước trực quan (cho 6 mẫu in x 2 khổ giấy 80mm & 58mm) vào thư mục `tmp/print-preview/`.
+- **In thử nghiệm tới máy in thật**:
+  ```bash
+  npm run print:test -- <ip> <kitchen|bar|receipt>
+  # Ví dụ:
+  npm run print:test -- 192.168.1.200 kitchen
+  npm run print:test -- 192.168.1.202 receipt
+  ```

@@ -11,6 +11,7 @@ import {
   UserOutlined,
   LogoutOutlined,
   CheckCircleOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { useRouter, usePathname } from "next/navigation";
 import dayjs from "dayjs";
@@ -103,6 +104,12 @@ export function MainLayout({ children }: MainLayoutProps) {
                 icon: <CoffeeOutlined />,
                 label: "Quản lý thực đơn",
                 onClick: () => router.push("/admin/menu"),
+              },
+              {
+                key: "/admin/settings",
+                icon: <SettingOutlined />,
+                label: "Cài đặt máy in",
+                onClick: () => router.push("/admin/settings"),
               },
             ],
           },
