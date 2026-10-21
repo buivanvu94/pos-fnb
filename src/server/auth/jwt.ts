@@ -1,6 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
 import { z } from "zod";
-import type { Role } from "@/lib/permissions";
 
 export const AUTH_COOKIE_NAME = "pos_token";
 

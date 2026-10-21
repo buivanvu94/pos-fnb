@@ -3,10 +3,10 @@ import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { sql } from "drizzle-orm";
 import * as schema from "@/db/schema";
+import { getTestDbUrl } from "../setup/test-config";
 
 describe("Database Schema Integrity & Constraint Enforcement", () => {
-  const testDbUrl =
-    process.env.DATABASE_TEST_URL || "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos_test_p01";
+  const testDbUrl = getTestDbUrl();
   let pool: Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
   let testUserId: number;
@@ -59,6 +59,14 @@ describe("Database Schema Integrity & Constraint Enforcement", () => {
   });
 
   afterAll(async () => {
+    if (db) {
+      await db.delete(schema.cashEntries).where(sql`performed_by = ${testUserId}`);
+      await db.delete(schema.orders).where(sql`table_id = ${testTableId} OR shift_id = ${testShiftId}`);
+      await db.delete(schema.shifts).where(sql`cashier_id = ${testUserId}`);
+      await db.delete(schema.tables).where(sql`area_id = ${testAreaId}`);
+      await db.delete(schema.areas).where(sql`id = ${testAreaId}`);
+      await db.delete(schema.users).where(sql`id = ${testUserId}`);
+    }
     await pool.end();
   });
 

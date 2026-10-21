@@ -40,6 +40,19 @@ export function getPool(): Pool {
 }
 
 /**
+ * Lazily retrieves or instantiates the Drizzle ORM client.
+ * Connects directly to the REAL Pool instance (not a proxy) so that
+ * Drizzle node-postgres transaction connection checkout works atomically.
+ */
+export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
+  if (!globalForDb.posDb) {
+    const realPool = getPool();
+    globalForDb.posDb = drizzle(realPool, { schema });
+  }
+  return globalForDb.posDb;
+}
+
+/**
  * Lazy proxy around PostgreSQL connection pool.
  */
 export const pool = new Proxy({} as Pool, {
@@ -55,15 +68,14 @@ export const pool = new Proxy({} as Pool, {
 
 /**
  * Lazy proxy around Drizzle ORM client instance.
+ * Delegates to the real Drizzle instance built on the real Pool.
  */
 export const db = new Proxy({} as ReturnType<typeof drizzle<typeof schema>>, {
   get(_target, prop) {
-    if (!globalForDb.posDb) {
-      globalForDb.posDb = drizzle(pool, { schema });
-    }
-    const val = (globalForDb.posDb as unknown as Record<string, unknown>)[prop as string];
+    const activeDb = getDb();
+    const val = (activeDb as unknown as Record<string, unknown>)[prop as string];
     if (typeof val === "function") {
-      return (val as (...args: unknown[]) => unknown).bind(globalForDb.posDb);
+      return (val as (...args: unknown[]) => unknown).bind(activeDb);
     }
     return val;
   },

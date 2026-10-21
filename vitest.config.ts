@@ -1,6 +1,7 @@
 import { defineConfig } from "vitest/config";
 import path from "path";
 import * as dotenv from "dotenv";
+import { DEFAULT_TEST_DB_URL, TEST_JWT_SECRET } from "./tests/setup/test-config";
 
 dotenv.config();
 
@@ -12,10 +13,8 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     testTimeout: 20000,
     env: {
-      DATABASE_URL:
-        process.env.DATABASE_TEST_URL ||
-        "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos_test_p01",
-      JWT_SECRET: "test_jwt_secret_key_must_be_at_least_32_characters_long_for_tests",
+      DATABASE_URL: process.env.DATABASE_TEST_URL || DEFAULT_TEST_DB_URL,
+      JWT_SECRET: TEST_JWT_SECRET,
     },
   },
   resolve: {

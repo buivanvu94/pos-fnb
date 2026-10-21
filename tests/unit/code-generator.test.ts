@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@/db/schema";
+import { getTestDbUrl } from "../setup/test-config";
 import {
   formatYmdVietnam,
   generateShiftCode,
@@ -10,9 +11,7 @@ import {
 } from "@/db/code-generator";
 
 describe("Transaction-based Sequential Code Generator", () => {
-  const testDbUrl =
-    process.env.DATABASE_TEST_URL ||
-    "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos_test_p01";
+  const testDbUrl = getTestDbUrl();
   let pool: Pool;
   let testDb: ReturnType<typeof drizzle<typeof schema>>;
   let testUserId: number;

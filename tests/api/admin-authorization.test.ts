@@ -9,8 +9,7 @@ describe("Admin Route & Middleware Security Authorization", () => {
   it("never bypasses auth for /api/* or /admin/* even with static file extensions", async () => {
     // 1. /api/v1/orders/1.png -> must require auth (returns 401)
     const req1 = new NextRequest("http://localhost:3000/api/v1/orders/1.png");
-    const res1 = await middleware(req1);
-    expect(res1.status).toBe(401);
+    expect((await middleware(req1)).status).toBe(401);
 
     // 2. /admin/foo.js -> must require auth (redirects to /login)
     const req2 = new NextRequest("http://localhost:3000/admin/foo.js");
@@ -19,31 +18,39 @@ describe("Admin Route & Middleware Security Authorization", () => {
     expect(res2.headers.get("location")).toContain("/login");
 
     // 3. /admin.test -> must require auth
-    const req3 = new NextRequest("http://localhost:3000/admin.test");
-    const res3 = await middleware(req3);
-    expect(res3.status).toBe(307);
+    expect((await middleware(new NextRequest("http://localhost:3000/admin.test"))).status).toBe(307);
 
     // 4. /api/v1/auth/login-fake -> exact match ensures this is not treated as public login
-    const req4 = new NextRequest("http://localhost:3000/api/v1/auth/login-fake");
-    const res4 = await middleware(req4);
-    expect(res4.status).toBe(401);
+    expect((await middleware(new NextRequest("http://localhost:3000/api/v1/auth/login-fake"))).status).toBe(401);
   });
 
-  it("strips spoofed x-user-* headers and blocks non-QUAN_LY from /admin", async () => {
-    // A: Spoofed headers without token -> 401
+  it("strips spoofed x-user-* headers and sets verified downstream headers", async () => {
+    // A: Spoofed headers without token -> blocked with 401
     const unauthReq = new NextRequest("http://localhost:3000/api/v1/tables", {
       headers: { "x-user-role": "QUAN_LY", "x-user-id": "1", "x-user-name": "Hacker" },
     });
-    const unauthRes = await middleware(unauthReq);
-    expect(unauthRes.status).toBe(401);
+    expect((await middleware(unauthReq)).status).toBe(401);
 
-    // B: THU_NGAN token + spoofed header x-user-role: QUAN_LY visiting /admin -> 403
+    // B: Valid THU_NGAN token with spoofed x-user-role: QUAN_LY on a valid route
     const cashierToken = await signAuthToken({
       userId: 2,
       username: "thungan",
       fullName: "Trần Thị Thu Ngân",
       role: "THU_NGAN",
     });
+    const validReq = new NextRequest("http://localhost:3000/api/v1/tables", {
+      headers: {
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+        "x-user-role": "QUAN_LY",
+        "x-user-id": "99",
+      },
+    });
+    const validRes = await middleware(validReq);
+    expect(validRes.status).toBe(200);
+    expect(validRes.headers.get("x-middleware-request-x-user-role")).toBe("THU_NGAN");
+    expect(validRes.headers.get("x-middleware-request-x-user-id")).toBe("2");
+
+    // C: THU_NGAN token + spoofed header x-user-role: QUAN_LY visiting /admin -> 403
     const spoofReq = new NextRequest("http://localhost:3000/admin", {
       headers: {
         Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
@@ -51,22 +58,20 @@ describe("Admin Route & Middleware Security Authorization", () => {
         "x-user-id": "1",
       },
     });
-    const spoofRes = await middleware(spoofReq);
-    expect(spoofRes.status).toBe(403);
+    expect((await middleware(spoofReq)).status).toBe(403);
   });
 
   it("blocks PHUC_VU with 403 on admin API routes", async () => {
     const waiterToken = await signAuthToken({
       userId: 3,
       username: "phucvu",
-      fullName: "Lê Văn Phục Vụ",
+      fullName: "Phục Vụ",
       role: "PHUC_VU",
     });
     const req = new NextRequest("http://localhost:3000/api/v1/admin/summary", {
       headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
     });
-    const res = await middleware(req);
-    expect(res.status).toBe(403);
+    expect((await middleware(req)).status).toBe(403);
   });
 
   it("permits QUAN_LY to access admin API route", async () => {
@@ -115,7 +120,7 @@ describe("Admin Route & Middleware Security Authorization", () => {
     );
     expect(waiterRes.status).toBe(403);
 
-    // 2. Thu ngân querying another cashier's report -> 403
+    // 2. Thu ngân querying another cashier's report (cashierId=99) -> 403
     const otherRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue?cashierId=99", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
@@ -123,7 +128,18 @@ describe("Admin Route & Middleware Security Authorization", () => {
     );
     expect(otherRes.status).toBe(403);
 
-    // 3. Thu ngân querying without cashierId defaults to own shift -> 501
+    // 3. Thu ngân querying own shift with cashierId=2 -> 501
+    const ownWithIdRes = await revenueReportHandler(
+      new NextRequest("http://localhost:3000/api/v1/reports/revenue?cashierId=2", {
+        headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
+      }),
+    );
+    expect(ownWithIdRes.status).toBe(501);
+    const ownWithIdData = await ownWithIdRes.json();
+    expect(ownWithIdData.scope).toBe("OWN_SHIFT_REVENUE");
+    expect(ownWithIdData.code).toBe("NOT_IMPLEMENTED");
+
+    // 4. Thu ngân querying without cashierId defaults to own shift -> 501
     const ownRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
@@ -132,9 +148,8 @@ describe("Admin Route & Middleware Security Authorization", () => {
     expect(ownRes.status).toBe(501);
     const ownData = await ownRes.json();
     expect(ownData.scope).toBe("OWN_SHIFT_REVENUE");
-    expect(ownData.code).toBe("NOT_IMPLEMENTED");
 
-    // 4. Quản lý -> 501 general report
+    // 5. Quản lý -> 501 general report
     const mgrRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },

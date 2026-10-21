@@ -99,3 +99,22 @@ src/
 tests/                    # Bộ kiểm thử tự động Vitest
 docs/                     # Tài liệu kiến trúc và hướng dẫn dự án
 ```
+
+## 4. Bảo mật & Xác thực (Security Architecture)
+
+- **Quyết định kiến trúc Cookie httpOnly thay vì Bearer Token**:
+  - API sử dụng cookie `pos_token` mang thuộc tính `httpOnly`, `sameSite: "lax"`, và `secure` (tự động bật trên production hoặc cấu hình qua `COOKIE_SECURE`).
+  - Khác biệt so với ghi chú ban đầu tại `ba/09-api.md` (truyền Bearer token qua header `Authorization`), đây là quyết định kiến trúc có chủ đích dành cho ứng dụng Same-Origin Web POS.
+  - Lợi ích: Chống triệt để việc đánh cắp token qua tấn công XSS từ client scripts, tự động đính kèm thông tin phiên an toàn trên trình duyệt và tối ưu thao tác cảm ứng trên máy POS.
+
+- **Thời hạn hiệu lực Token & Đánh đổi Stateless JWT (7-Day Validity)**:
+  - Token JWT có hạn 7 ngày, xác thực phi trạng thái bằng HS256 thông qua Next.js Middleware mà không query database trên từng request, bảo đảm độ trễ phản hồi thấp nhất cho quầy thu ngân.
+  - **Đánh đổi bảo mật**: Việc thay đổi vai trò (role) hoặc vô hiệu hóa tài khoản nhân viên trong database chỉ có hiệu lực triệt để khi phiên làm việc hiện tại hết hạn hoặc người dùng đăng xuất.
+  - **Mở rộng tương lai (Phase 02+)**: Nếu cần cơ chế thu hồi quyền ngay lập tức (immediate revocation), hệ thống có thể bổ sung trường `token_version` so khớp phiên hoặc quản lý danh sách đen (token blacklist) qua Redis/in-memory cache.
+
+- **Chống giả mạo Header (Header Spoofing Protection)**:
+  - Next.js Middleware tự động bóc tách (strip) toàn bộ header `x-user-*` được client gửi lên trước khi chuyển giao request cho server components hoặc API handlers.
+  - Chỉ các request có cookie JWT hợp lệ mới được giải mã và gán header người dùng đã xác minh (`x-user-role`, `x-user-id`, `x-user-name`).
+
+- **Bảo vệ đường dẫn tĩnh & Ngăn chặn Bypass**:
+  - Biểu thức chính quy bỏ qua asset tĩnh (ảnh, css, js) không bao giờ áp dụng cho các tiền tố `/api/*` và `/admin/*`, ngăn chặn triệt để hành vi bypass xác thực qua đuôi file.
