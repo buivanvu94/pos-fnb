@@ -5,6 +5,8 @@ import { shifts } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
 import { generateShiftCode } from "@/db/code-generator";
 
+const MAX_MONEY = 2_000_000_000;
+
 /**
  * POST /api/v1/shifts/open (API-01, FR-06, BR-01, AC-01-1)
  * Opens a new cashier shift with recorded initial cash.
@@ -20,7 +22,7 @@ export async function POST(req: NextRequest) {
 
   const { user } = auth;
 
-  let body: { tienDauCa?: unknown; initialCash?: unknown };
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
@@ -30,23 +32,32 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const rawAmount = body.tienDauCa !== undefined ? body.tienDauCa : body.initialCash;
+  // Validate that body is a non-null, non-array object
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json(
+      { ok: false, error: "Dữ liệu JSON phải là một đối tượng hợp lệ" },
+      { status: 400 },
+    );
+  }
+
+  const { tienDauCa } = body as Record<string, unknown>;
 
   if (
-    typeof rawAmount !== "number" ||
-    !Number.isInteger(rawAmount) ||
-    rawAmount < 0
+    typeof tienDauCa !== "number" ||
+    !Number.isInteger(tienDauCa) ||
+    tienDauCa < 0 ||
+    tienDauCa > MAX_MONEY
   ) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Số tiền đầu ca phải là số nguyên lớn hơn hoặc bằng 0",
+        error: "Số tiền đầu ca phải là số nguyên không âm và không vượt quá 2.000.000.000 VNĐ",
       },
       { status: 400 },
     );
   }
 
-  const initialCash = rawAmount;
+  const initialCash = tienDauCa;
 
   try {
     // Check if cashier already has an active shift before starting transaction
@@ -75,6 +86,7 @@ export async function POST(req: NextRequest) {
           shiftCode,
           cashierId: user.userId,
           initialCash,
+          expectedCash: initialCash,
           status: "DANG_MO",
           openedAt: new Date(),
         })

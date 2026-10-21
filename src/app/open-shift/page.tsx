@@ -19,6 +19,7 @@ import {
   UserOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
@@ -26,6 +27,7 @@ import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { formatVndNumber, parseVnd } from "@/lib/money";
 
 const { Title, Text } = Typography;
+const MAX_MONEY = 2_000_000_000;
 
 interface CurrentUser {
   id: number;
@@ -110,6 +112,8 @@ export default function OpenShiftPage() {
     );
   }
 
+  const isWaiter = user?.role === "PHUC_VU";
+
   return (
     <div
       style={{
@@ -132,9 +136,13 @@ export default function OpenShiftPage() {
         <div style={{ textAlign: "center", marginBottom: 20 }}>
           <DollarOutlined style={{ fontSize: 36, color: "#1677ff" }} />
           <Title level={3} style={{ marginTop: 8, marginBottom: 4 }}>
-            Mở ca làm việc (SCR-01)
+            Mở ca làm việc
           </Title>
-          <Text type="secondary">Nhập số dư tiền lẻ đầu ca trong két để bắt đầu phiên bán hàng</Text>
+          <Text type="secondary">
+            {isWaiter
+              ? "Nhân viên phục vụ cần có ca làm việc đang mở để bắt đầu bán hàng"
+              : "Nhập số dư tiền lẻ đầu ca trong két để bắt đầu phiên bán hàng"}
+          </Text>
         </div>
 
         {/* Verbatim Alert according to BR-01 & ERR-01 */}
@@ -150,11 +158,11 @@ export default function OpenShiftPage() {
           <Space direction="vertical" style={{ width: "100%" }} size={4}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <Text type="secondary">
-                <UserOutlined /> Thu ngân:
+                <UserOutlined /> Nhân viên:
               </Text>
               <Space>
                 <Text strong>{user?.fullName || "Chưa xác định"}</Text>
-                <Tag color="green">{user?.role || "THU_NGAN"}</Tag>
+                <Tag color={isWaiter ? "orange" : "green"}>{user?.role || "THU_NGAN"}</Tag>
               </Space>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -166,53 +174,79 @@ export default function OpenShiftPage() {
           </Space>
         </div>
 
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ tienDauCa: 1000000 }}
-          onFinish={handleSubmit}
-        >
-          <Form.Item
-            name="tienDauCa"
-            label={<Text strong>Số tiền mặt đầu ca (Tiền lẻ trong két)</Text>}
-            rules={[
-              { required: true, message: "Vui lòng nhập số tiền đầu ca" },
-              {
-                validator: async (_, value) => {
-                  if (value === undefined || value === null) return;
-                  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-                    throw new Error("Số tiền đầu ca phải là số nguyên lớn hơn hoặc bằng 0");
-                  }
-                },
-              },
-            ]}
-          >
-            <InputNumber<number>
-              style={{ width: "100%" }}
-              size="large"
-              placeholder="1.000.000"
-              formatter={(value) => (value !== undefined ? formatVndNumber(Number(value)) : "")}
-              parser={(displayValue) => (displayValue ? parseVnd(displayValue) : 0)}
-              addonAfter="₫"
+        {/* For PHUC_VU: Do not show form; show guidance Alert per review item 1 */}
+        {isWaiter ? (
+          <div>
+            <Alert
+              message="Chưa có ca làm việc đang mở"
+              description="Nhân viên phục vụ không thể mở ca. Vui lòng liên hệ thu ngân hoặc quản lý để mở ca làm việc trước khi thực hiện bán hàng."
+              type="warning"
+              showIcon
+              style={{ marginBottom: 20 }}
             />
-          </Form.Item>
-
-          <Divider style={{ margin: "16px 0" }} />
-
-          <Form.Item style={{ marginBottom: 0 }}>
             <Button
               type="primary"
-              htmlType="submit"
               size="large"
               block
-              loading={submitting}
-              icon={<CheckCircleOutlined />}
-              style={{ height: 48, fontWeight: 600, fontSize: 16 }}
+              icon={<ReloadOutlined />}
+              onClick={() => router.push("/tables")}
+              style={{ height: 48, fontWeight: 600 }}
             >
-              Xác nhận mở ca
+              Kiểm tra lại trạng thái ca
             </Button>
-          </Form.Item>
-        </Form>
+          </div>
+        ) : (
+          <Form
+            form={form}
+            layout="vertical"
+            initialValues={{ tienDauCa: 1000000 }}
+            onFinish={handleSubmit}
+          >
+            <Form.Item
+              name="tienDauCa"
+              label={<Text strong>Số tiền mặt đầu ca (Tiền lẻ trong két)</Text>}
+              rules={[
+                { required: true, message: "Vui lòng nhập số tiền đầu ca" },
+                {
+                  validator: async (_, value) => {
+                    if (value === undefined || value === null) return;
+                    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+                      throw new Error("Số tiền đầu ca phải là số nguyên lớn hơn hoặc bằng 0");
+                    }
+                    if (value > MAX_MONEY) {
+                      throw new Error("Số tiền đầu ca không được vượt quá 2.000.000.000 VNĐ");
+                    }
+                  },
+                },
+              ]}
+            >
+              <InputNumber<number>
+                style={{ width: "100%" }}
+                size="large"
+                placeholder="1.000.000"
+                formatter={(value) => (value !== undefined ? formatVndNumber(Number(value)) : "")}
+                parser={(displayValue) => (displayValue ? parseVnd(displayValue) : 0)}
+                addonAfter="₫"
+              />
+            </Form.Item>
+
+            <Divider style={{ margin: "16px 0" }} />
+
+            <Form.Item style={{ marginBottom: 0 }}>
+              <Button
+                type="primary"
+                htmlType="submit"
+                size="large"
+                block
+                loading={submitting}
+                icon={<CheckCircleOutlined />}
+                style={{ height: 48, fontWeight: 600, fontSize: 16 }}
+              >
+                Xác nhận mở ca
+              </Button>
+            </Form.Item>
+          </Form>
+        )}
       </Card>
     </div>
   );

@@ -1,8 +1,8 @@
-import { sql, eq, and } from "drizzle-orm";
+import { sql, eq, and, ne } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { payments, cashEntries } from "@/db/schema";
+import { payments, orders, cashEntries } from "@/db/schema";
 
 export interface CashBalanceSummary {
   initialCash: number;
@@ -32,8 +32,10 @@ export function computeTheoreticalCash(
 }
 
 /**
- * Queries real database records (payments and cash_entries) to compute
+ * Queries real database records (payments, orders, and cash_entries) to compute
  * the current theoretical cash balance for a shift.
+ * Excludes cancelled orders (orders.status = 'DA_HUY') per Rule BR-05.
+ * Strictly considers payments where payment_method = 'TIEN_MAT' and status = 'SUCCESS'.
  *
  * @param shiftId - ID of the target shift
  * @param initialCash - Opening cash of the shift
@@ -45,17 +47,19 @@ export async function getShiftCashBalance(
   initialCash: number,
   client: NodePgDatabase<typeof schema> | typeof db = db,
 ): Promise<CashBalanceSummary> {
-  // 1. Calculate cash sales from real payments table
+  // 1. Calculate cash sales from real payments joined with orders, excluding cancelled orders
   const salesResult = await client
     .select({
       total: sql<string>`COALESCE(SUM(${payments.amount}), 0)`,
     })
     .from(payments)
+    .innerJoin(orders, eq(payments.orderId, orders.id))
     .where(
       and(
         eq(payments.shiftId, shiftId),
         eq(payments.paymentMethod, "TIEN_MAT"),
         eq(payments.status, "SUCCESS"),
+        ne(orders.status, "DA_HUY"),
       ),
     );
 

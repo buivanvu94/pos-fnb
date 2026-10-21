@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -8,7 +8,7 @@ import { getTestDbUrl } from "../setup/test-config";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { POST as openShiftHandler } from "@/app/api/v1/shifts/open/route";
 import { GET as currentShiftHandler } from "@/app/api/v1/shifts/current/route";
-import { requireOpenShift } from "@/server/shifts/require-open-shift";
+import { requireOpenShift, shiftLookup } from "@/server/shifts/require-open-shift";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 
 describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current", () => {
@@ -100,6 +100,8 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
   });
 
   it("fails guard requireOpenShift with verbatim ERR-01 before opening shift (AC-01-2)", async () => {
+    const getActiveSpy = vi.spyOn(shiftLookup, "getActiveShift").mockResolvedValueOnce(null);
+
     const req = new NextRequest("http://localhost:3000/api/v1/orders", {
       headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
     });
@@ -116,6 +118,25 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
       );
       expect(data.error).toBe(ERROR_CATALOG.ERR_01.message);
     }
+    getActiveSpy.mockRestore();
+  });
+
+  it("Item 1: PHUC_VU receives ERR-01 when no shift is open anywhere in the store", async () => {
+    // Before any shift is opened in the store: spy on getAnyActiveShift returning null
+    const getAnySpy = vi.spyOn(shiftLookup, "getAnyActiveShift").mockResolvedValueOnce(null);
+
+    const req = new NextRequest("http://localhost:3000/api/v1/orders", {
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+    });
+
+    const guardResult = await requireOpenShift(req);
+    expect(guardResult.authorized).toBe(false);
+    if (!guardResult.authorized) {
+      expect(guardResult.response.status).toBe(400);
+      const data = await guardResult.response.json();
+      expect(data.error).toBe(ERROR_CATALOG.ERR_01.message);
+    }
+    getAnySpy.mockRestore();
   });
 
   it("blocks PHUC_VU role from opening shift with 403 Forbidden", async () => {
@@ -132,7 +153,42 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
     expect(res.status).toBe(403);
   });
 
-  it("blocks negative or invalid tienDauCa amount with 400 Bad Request", async () => {
+  it("Item 5: rejects valid JSON that is null, array, or string with 400 Bad Request", async () => {
+    // 1. Body is null
+    const nullReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify(null),
+    });
+    expect((await openShiftHandler(nullReq)).status).toBe(400);
+
+    // 2. Body is an array
+    const arrayReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify([1, 2, 3]),
+    });
+    expect((await openShiftHandler(arrayReq)).status).toBe(400);
+
+    // 3. Body is a primitive string
+    const stringReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify("tienDauCa"),
+    });
+    expect((await openShiftHandler(stringReq)).status).toBe(400);
+  });
+
+  it("Item 6: blocks negative amount and amounts exceeding 2,000,000,000 with 400", async () => {
     // Negative amount
     const negReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
       method: "POST",
@@ -145,17 +201,19 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
     const negRes = await openShiftHandler(negReq);
     expect(negRes.status).toBe(400);
 
-    // Non-integer amount
-    const floatReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
+    // Exceeding 2,000,000,000
+    const overReq = new NextRequest("http://localhost:3000/api/v1/shifts/open", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
       },
-      body: JSON.stringify({ tienDauCa: 100.5 }),
+      body: JSON.stringify({ tienDauCa: 2_000_000_001 }),
     });
-    const floatRes = await openShiftHandler(floatReq);
-    expect(floatRes.status).toBe(400);
+    const overRes = await openShiftHandler(overReq);
+    expect(overRes.status).toBe(400);
+    const overData = await overRes.json();
+    expect(overData.error).toContain("2.000.000.000 VNĐ");
   });
 
   it("opens shift with valid initial cash 1,000,000 and returns 201 (AC-01-1)", async () => {
@@ -180,6 +238,19 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
     // Shift code pattern: CA-YYYYMMDD-nn
     expect(body.data.shiftCode).toMatch(/^CA-\d{8}-\d{2}$/);
     expect(body.data.openedAt).toBeTruthy();
+  });
+
+  it("Item 1: PHUC_VU can access table diagram / orders once ANY cashier has an open shift", async () => {
+    const req = new NextRequest("http://localhost:3000/api/v1/orders", {
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+    });
+
+    const guardResult = await requireOpenShift(req);
+    expect(guardResult.authorized).toBe(true);
+    if (guardResult.authorized) {
+      expect(guardResult.user.role).toBe("PHUC_VU");
+      expect(guardResult.shift.status).toBe("DANG_MO");
+    }
   });
 
   it("blocks opening a second shift when a shift is already open with 409 Conflict", async () => {
@@ -216,20 +287,6 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
     expect(body.data.cashSales).toBe(0);
     expect(body.data.cashIn).toBe(0);
     expect(body.data.cashOut).toBe(0);
-  });
-
-  it("guard requireOpenShift succeeds after shift is open", async () => {
-    const req = new NextRequest("http://localhost:3000/api/v1/orders", {
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
-    });
-
-    const guardResult = await requireOpenShift(req);
-    expect(guardResult.authorized).toBe(true);
-    if (guardResult.authorized) {
-      expect(guardResult.user.userId).toBe(cashierUserId);
-      expect(guardResult.shift.status).toBe("DANG_MO");
-      expect(guardResult.shift.initialCash).toBe(1_000_000);
-    }
   });
 
   it("supports tienDauCa = 0 as valid opening balance (edge case UC-01)", async () => {

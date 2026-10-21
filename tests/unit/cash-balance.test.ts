@@ -30,6 +30,7 @@ describe("BR-05 Theoretical Cash Balance Unit Tests", () => {
     let testUserId: number;
     let testShiftId: number;
     let testOrderId: number;
+    let cancelledOrderId: number;
 
     const rand = () => Math.random().toString(36).slice(2, 8);
 
@@ -61,7 +62,7 @@ describe("BR-05 Theoretical Cash Balance Unit Tests", () => {
         .returning({ id: schema.shifts.id });
       testShiftId = shift.id;
 
-      // Create an order associated with the shift
+      // Create a valid order associated with the shift
       const [order] = await db
         .insert(schema.orders)
         .values({
@@ -74,13 +75,27 @@ describe("BR-05 Theoretical Cash Balance Unit Tests", () => {
         })
         .returning({ id: schema.orders.id });
       testOrderId = order.id;
+
+      // Create a CANCELLED order (DA_HUY)
+      const [cancelledOrder] = await db
+        .insert(schema.orders)
+        .values({
+          orderCode: `ORD_CNL_${rand()}`,
+          orderType: "TAI_BAN",
+          shiftId: testShiftId,
+          totalAmount: 180_000,
+          finalAmount: 180_000,
+          status: "DA_HUY",
+        })
+        .returning({ id: schema.orders.id });
+      cancelledOrderId = cancelledOrder.id;
     });
 
     afterAll(async () => {
       if (db) {
         await db.delete(schema.payments).where(sql`shift_id = ${testShiftId}`);
         await db.delete(schema.cashEntries).where(sql`shift_id = ${testShiftId}`);
-        await db.delete(schema.orders).where(sql`id = ${testOrderId}`);
+        await db.delete(schema.orders).where(sql`id IN (${testOrderId}, ${cancelledOrderId})`);
         await db.delete(schema.shifts).where(sql`id = ${testShiftId}`);
         await db.delete(schema.users).where(sql`id = ${testUserId}`);
       }
@@ -124,7 +139,35 @@ describe("BR-05 Theoretical Cash Balance Unit Tests", () => {
         status: "SUCCESS",
       });
 
-      // 4. Insert VietQR payment of 100,000 (should NOT be added to cash sales)
+      const summary = await getShiftCashBalance(testShiftId, 1_000_000, db);
+      expect(summary.initialCash).toBe(1_000_000);
+      expect(summary.cashIn).toBe(200_000);
+      expect(summary.cashOut).toBe(50_000);
+      expect(summary.cashSales).toBe(350_000);
+      // Expected: 1,000,000 + 350,000 + 200,000 - 50,000 = 1,500,000
+      expect(summary.expectedCash).toBe(1_500_000);
+    });
+
+    it("Item 2: payment PENDING, FAILED, VIETQR, and payment SUCCESS of cancelled order (DA_HUY) are NOT added to cashSales", async () => {
+      // 1. Payment with status = 'PENDING'
+      await db.insert(schema.payments).values({
+        orderId: testOrderId,
+        shiftId: testShiftId,
+        paymentMethod: "TIEN_MAT",
+        amount: 40_000,
+        status: "PENDING",
+      });
+
+      // 2. Payment with status = 'FAILED'
+      await db.insert(schema.payments).values({
+        orderId: testOrderId,
+        shiftId: testShiftId,
+        paymentMethod: "TIEN_MAT",
+        amount: 60_000,
+        status: "FAILED",
+      });
+
+      // 3. Payment with paymentMethod = 'VIETQR' (even if SUCCESS)
       await db.insert(schema.payments).values({
         orderId: testOrderId,
         shiftId: testShiftId,
@@ -133,12 +176,19 @@ describe("BR-05 Theoretical Cash Balance Unit Tests", () => {
         status: "SUCCESS",
       });
 
+      // 4. Payment with status = 'SUCCESS' and TIEN_MAT, but belonging to CANCELLED order (DA_HUY)
+      await db.insert(schema.payments).values({
+        orderId: cancelledOrderId,
+        shiftId: testShiftId,
+        paymentMethod: "TIEN_MAT",
+        amount: 180_000,
+        status: "SUCCESS",
+      });
+
       const summary = await getShiftCashBalance(testShiftId, 1_000_000, db);
-      expect(summary.initialCash).toBe(1_000_000);
-      expect(summary.cashIn).toBe(200_000);
-      expect(summary.cashOut).toBe(50_000);
+      // None of the 4 invalid payments above should be added to cashSales
+      // cashSales should remain strictly 350,000
       expect(summary.cashSales).toBe(350_000);
-      // Expected: 1,000,000 + 350,000 + 200,000 - 50,000 = 1,500,000
       expect(summary.expectedCash).toBe(1_500_000);
     });
   });

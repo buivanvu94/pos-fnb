@@ -23,7 +23,7 @@ export type RequireOpenShiftResult =
   | OpenShiftResultFailure;
 
 /**
- * Finds an active shift (status = 'DANG_MO') for a cashier user.
+ * Finds an active shift (status = 'DANG_MO') for a specific cashier user.
  */
 export async function getActiveShift(userId: number): Promise<Shift | null> {
   const [activeShift] = await db
@@ -36,8 +36,30 @@ export async function getActiveShift(userId: number): Promise<Shift | null> {
 }
 
 /**
+ * Finds any active shift ('DANG_MO') currently open in the store.
+ * For PHUC_VU role: waiters cannot open shifts per permission matrix,
+ * but can access table diagram / orders as long as ANY active shift is open (BR-01).
+ */
+export async function getAnyActiveShift(): Promise<Shift | null> {
+  const [anyShift] = await db
+    .select()
+    .from(shifts)
+    .where(eq(shifts.status, "DANG_MO"))
+    .limit(1);
+
+  return anyShift ?? null;
+}
+
+export const shiftLookup = {
+  getActiveShift,
+  getAnyActiveShift,
+};
+
+/**
  * Shared guard for API route handlers (FR-06, BR-01, ERR-01, AC-01-2).
- * Verifies authenticated session and ensures the user has an active shift ('DANG_MO').
+ * Verifies authenticated session and checks shift status:
+ * - For PHUC_VU: requires at least one active shift in the store.
+ * - For QUAN_LY and THU_NGAN: requires an active shift belonging to the user.
  * Returns verbatim ERR-01 message with HTTP 400 on failure.
  *
  * @param req - Incoming NextRequest
@@ -66,7 +88,12 @@ export async function requireOpenShift(req: NextRequest): Promise<RequireOpenShi
     };
   }
 
-  const shift = await getActiveShift(user.userId);
+  // Evaluate active shift according to role
+  const shift =
+    user.role === "PHUC_VU"
+      ? await shiftLookup.getAnyActiveShift()
+      : await shiftLookup.getActiveShift(user.userId);
+
   if (!shift) {
     return {
       authorized: false,
@@ -91,7 +118,7 @@ export async function requireOpenShift(req: NextRequest): Promise<RequireOpenShi
 /**
  * Server Component guard for POS pages (e.g. /tables, /counter).
  * Inspects request cookies, validates the active shift, and triggers
- * server-side redirect to /open-shift if the cashier has no open shift (BR-01, ERR-01).
+ * server-side redirect to /open-shift if conditions are not met (BR-01, ERR-01).
  *
  * @returns Current user and active shift
  */
@@ -108,8 +135,11 @@ export async function requireOpenShiftPage(): Promise<{ user: TokenPayload; shif
     redirect("/login");
   }
 
-  // PHUC_VU role does not open shifts, but POS operations check active cashier shift
-  const shift = await getActiveShift(user.userId);
+  const shift =
+    user.role === "PHUC_VU"
+      ? await shiftLookup.getAnyActiveShift()
+      : await shiftLookup.getActiveShift(user.userId);
+
   if (!shift) {
     redirect("/open-shift");
   }

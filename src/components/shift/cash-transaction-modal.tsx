@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { Modal, Form, Segmented, InputNumber, Input, App } from "antd";
 import { formatVndNumber, parseVnd } from "@/lib/money";
 
+const MAX_MONEY = 2_000_000_000;
+
 interface CashTransactionModalProps {
   open: boolean;
   onClose: () => void;
@@ -58,7 +60,7 @@ export function CashTransactionModal({
 
   return (
     <Modal
-      title="SCR-07: Thu / Chi tiền mặt trong ca"
+      title="Thu / Chi tiền mặt trong ca"
       open={open}
       onCancel={() => {
         form.resetFields();
@@ -101,6 +103,9 @@ export function CashTransactionModal({
                 if (value === undefined || value === null) return;
                 if (typeof value !== "number" || value <= 0) {
                   throw new Error("Số tiền phải lớn hơn 0 VNĐ");
+                }
+                if (value > MAX_MONEY) {
+                  throw new Error("Số tiền không được vượt quá 2.000.000.000 VNĐ");
                 }
               },
             },
