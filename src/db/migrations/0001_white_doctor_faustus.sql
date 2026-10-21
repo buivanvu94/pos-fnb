@@ -1,13 +1,78 @@
-ALTER TABLE "cash_entries" ALTER COLUMN "performed_by" SET DATA TYPE integer USING (CASE WHEN performed_by ~ '^[0-9]+$' THEN performed_by::integer ELSE 1 END);--> statement-breakpoint
+-- Migration 0001: Schema hardening, foreign keys, constraints, and performance indexes.
+-- Pre-condition checks are executed prior to modifying columns and creating unique constraints
+-- to ensure existing data integrity and prevent migration failures in production.
+
+DO $$
+BEGIN
+  -- 1. Validate cash_entries.performed_by before type conversion
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' AND table_name = 'cash_entries' AND column_name = 'performed_by'
+  ) THEN
+    -- Check for non-numeric values
+    IF EXISTS (
+      SELECT 1 FROM "cash_entries" 
+      WHERE "performed_by" IS NOT NULL AND "performed_by"::text !~ '^[0-9]+$'
+    ) THEN
+      RAISE EXCEPTION 'Pre-migration check failed: cash_entries contains non-numeric performed_by values.';
+    END IF;
+
+    -- Check for unreferenced user IDs
+    IF EXISTS (
+      SELECT 1 FROM "cash_entries" c
+      WHERE c."performed_by" IS NOT NULL 
+        AND NOT EXISTS (SELECT 1 FROM "users" u WHERE u."id" = c."performed_by"::integer)
+    ) THEN
+      RAISE EXCEPTION 'Pre-migration check failed: cash_entries contains performed_by referencing non-existent users.';
+    END IF;
+  END IF;
+
+  -- 2. Validate shifts: ensure no cashier has multiple active (DANG_MO) shifts
+  IF EXISTS (
+    SELECT 1 FROM "shifts"
+    WHERE "status" = 'DANG_MO'
+    GROUP BY "cashier_id"
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Pre-migration check failed: cashier has multiple active shifts (DANG_MO).';
+  END IF;
+
+  -- 3. Validate orders: ensure no table has multiple active (DANG_PHUC_VU) orders
+  IF EXISTS (
+    SELECT 1 FROM "orders"
+    WHERE "status" = 'DANG_PHUC_VU' AND "table_id" IS NOT NULL
+    GROUP BY "table_id"
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Pre-migration check failed: table has multiple active orders (DANG_PHUC_VU).';
+  END IF;
+
+  -- 4. Validate tables: ensure no duplicate table names within the same area
+  IF EXISTS (
+    SELECT 1 FROM "tables"
+    GROUP BY "area_id", "name"
+    HAVING COUNT(*) > 1
+  ) THEN
+    RAISE EXCEPTION 'Pre-migration check failed: duplicate table name detected in the same area.';
+  END IF;
+END $$;--> statement-breakpoint
+ALTER TABLE "cash_entries" ALTER COLUMN "performed_by" SET DATA TYPE integer USING "performed_by"::integer;--> statement-breakpoint
 ALTER TABLE "cash_entries" ADD CONSTRAINT "cash_entries_performed_by_users_id_fk" FOREIGN KEY ("performed_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "cash_entries_shift_id_idx" ON "cash_entries" USING btree ("shift_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "shifts_cashier_active_unique" ON "shifts" USING btree ("cashier_id") WHERE status = 'DANG_MO';--> statement-breakpoint
+CREATE INDEX "shifts_cashier_id_idx" ON "shifts" USING btree ("cashier_id");--> statement-breakpoint
+CREATE INDEX "shifts_approved_by_id_idx" ON "shifts" USING btree ("approved_by_id");--> statement-breakpoint
 CREATE INDEX "order_items_order_id_idx" ON "order_items" USING btree ("order_id");--> statement-breakpoint
+CREATE INDEX "order_items_menu_item_id_idx" ON "order_items" USING btree ("menu_item_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "orders_table_active_unique" ON "orders" USING btree ("table_id") WHERE status = 'DANG_PHUC_VU' AND table_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "orders_shift_id_idx" ON "orders" USING btree ("shift_id");--> statement-breakpoint
 CREATE INDEX "orders_table_id_idx" ON "orders" USING btree ("table_id");--> statement-breakpoint
 CREATE INDEX "payments_order_id_idx" ON "payments" USING btree ("order_id");--> statement-breakpoint
+CREATE INDEX "payments_shift_id_idx" ON "payments" USING btree ("shift_id");--> statement-breakpoint
+CREATE INDEX "menu_items_category_id_idx" ON "menu_items" USING btree ("category_id");--> statement-breakpoint
+CREATE INDEX "audit_logs_user_id_idx" ON "audit_logs" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "outbox_status_idx" ON "outbox" USING btree ("status");--> statement-breakpoint
+CREATE INDEX "print_jobs_order_id_idx" ON "print_jobs" USING btree ("order_id");--> statement-breakpoint
 CREATE INDEX "print_jobs_status_idx" ON "print_jobs" USING btree ("status");--> statement-breakpoint
 ALTER TABLE "tables" ADD CONSTRAINT "tables_area_id_name_unique" UNIQUE("area_id","name");--> statement-breakpoint
 ALTER TABLE "users" ADD CONSTRAINT "users_role_check" CHECK ("users"."role" IN ('QUAN_LY', 'THU_NGAN', 'PHUC_VU'));--> statement-breakpoint

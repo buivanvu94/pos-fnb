@@ -1,15 +1,19 @@
 import { SignJWT, jwtVerify } from "jose";
+import { z } from "zod";
 import type { Role } from "@/lib/permissions";
 
 export const AUTH_COOKIE_NAME = "pos_token";
 
-export interface TokenPayload {
-  userId: number;
-  username: string;
-  fullName: string;
-  role: Role;
+export const TokenPayloadSchema = z.object({
+  userId: z.number().int().positive(),
+  username: z.string().min(1),
+  fullName: z.string().default(""),
+  role: z.enum(["QUAN_LY", "THU_NGAN", "PHUC_VU"]),
+});
+
+export type TokenPayload = z.infer<typeof TokenPayloadSchema> & {
   [key: string]: unknown;
-}
+};
 
 /**
  * Retrieves the JWT signing secret from environment variables.
@@ -78,12 +82,11 @@ export async function verifyAuthToken(token: string): Promise<TokenPayload | nul
     const { payload } = await jwtVerify(token, key, {
       algorithms: ["HS256"],
     });
-    return {
-      userId: payload.userId as number,
-      username: payload.username as string,
-      fullName: payload.fullName as string,
-      role: payload.role as Role,
-    };
+    const parsed = TokenPayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+      return null;
+    }
+    return parsed.data;
   } catch {
     return null;
   }

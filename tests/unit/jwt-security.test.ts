@@ -66,4 +66,21 @@ describe("JWT Security & Secret Configuration", () => {
     expect(payload).not.toBeNull();
     expect(payload?.role).toBe("QUAN_LY");
   });
+
+  it("rejects token payload failing Zod validation (negative id, invalid role, empty username)", async () => {
+    process.env.JWT_SECRET = "valid_test_secret_for_token_verification_min_32_chars";
+
+    // Invalid role
+    // @ts-expect-error test invalid role
+    const invalidRoleToken = await signAuthToken({ userId: 1, username: "admin", role: "SUPERADMIN" });
+    expect(await verifyAuthToken(invalidRoleToken)).toBeNull();
+
+    // Negative userId
+    const invalidIdToken = await signAuthToken({ userId: -5, username: "user", role: "PHUC_VU", fullName: "" });
+    expect(await verifyAuthToken(invalidIdToken)).toBeNull();
+
+    // Empty username
+    const emptyUserToken = await signAuthToken({ userId: 1, username: "", role: "THU_NGAN", fullName: "" });
+    expect(await verifyAuthToken(emptyUserToken)).toBeNull();
+  });
 });

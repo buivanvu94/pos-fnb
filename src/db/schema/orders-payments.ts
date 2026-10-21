@@ -69,6 +69,7 @@ export const orderItems = pgTable(
   },
   (table) => [
     index("order_items_order_id_idx").on(table.orderId),
+    index("order_items_menu_item_id_idx").on(table.menuItemId),
     check("order_items_quantity_check", sql`${table.quantity} > 0`),
     check("order_items_unit_price_check", sql`${table.unitPrice} >= 0`),
   ],
@@ -97,6 +98,7 @@ export const payments = pgTable(
   },
   (table) => [
     index("payments_order_id_idx").on(table.orderId),
+    index("payments_shift_id_idx").on(table.shiftId),
     check("payments_payment_method_check", sql`${table.paymentMethod} IN ('TIEN_MAT', 'VIETQR')`),
     check("payments_amount_check", sql`${table.amount} > 0`),
     check("payments_status_check", sql`${table.status} IN ('PENDING', 'SUCCESS', 'FAILED')`),

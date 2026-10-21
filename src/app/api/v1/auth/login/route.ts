@@ -11,15 +11,24 @@ import type { Role } from "@/lib/permissions";
  * Handles user authentication with username and password, returns JWT in httpOnly cookie.
  */
 export async function POST(req: NextRequest) {
-  let body: Record<string, unknown>;
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json(
       { ok: false, error: "Dữ liệu yêu cầu không hợp lệ (lỗi parse JSON)" },
       { status: 400 },
     );
   }
+
+  if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+    return NextResponse.json(
+      { ok: false, error: "Dữ liệu yêu cầu không hợp lệ (body phải là object)" },
+      { status: 400 },
+    );
+  }
+
+  const body = rawBody as Record<string, unknown>;
 
   try {
     const { username, password } = body;

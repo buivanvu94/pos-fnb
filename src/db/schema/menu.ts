@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, boolean, text, timestamp, check } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, integer, boolean, text, timestamp, index, check } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /**
@@ -35,6 +35,7 @@ export const menuItems = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    index("menu_items_category_id_idx").on(table.categoryId),
     check("menu_items_price_check", sql`${table.price} >= 0`),
     check("menu_items_status_check", sql`${table.status} IN ('DANG_BAN', 'HET_HANG')`),
     check("menu_items_target_printer_check", sql`${table.targetPrinter} IN ('KITCHEN', 'BAR')`),

@@ -23,6 +23,7 @@ export const printJobs = pgTable(
   },
   (table) => [
     index("print_jobs_status_idx").on(table.status),
+    index("print_jobs_order_id_idx").on(table.orderId),
     check(
       "print_jobs_job_type_check",
       sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT')`,
@@ -34,17 +35,23 @@ export const printJobs = pgTable(
 /**
  * Audit logs recording sensitive actions (PIN approvals, item cancellations, discounts).
  */
-export const auditLogs = pgTable("audit_logs", {
-  id: serial("id").primaryKey(),
-  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
-  action: varchar("action", { length: 50 }).notNull(),
-  entityType: varchar("entity_type", { length: 50 }).notNull(),
-  entityId: varchar("entity_id", { length: 50 }),
-  reason: varchar("reason", { length: 255 }),
-  metadata: text("metadata"),
-  ipAddress: varchar("ip_address", { length: 50 }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    action: varchar("action", { length: 50 }).notNull(),
+    entityType: varchar("entity_type", { length: 50 }).notNull(),
+    entityId: varchar("entity_id", { length: 50 }),
+    reason: varchar("reason", { length: 255 }),
+    metadata: text("metadata"),
+    ipAddress: varchar("ip_address", { length: 50 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("audit_logs_user_id_idx").on(table.userId),
+  ],
+);
 
 /**
  * Outbox queue for offline-first LAN store synchronization to cloud (NFR-04, DEC-10).

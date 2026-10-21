@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Pool } from "pg";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "@/db/schema";
 import {
@@ -14,10 +15,33 @@ describe("Transaction-based Sequential Code Generator", () => {
     "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos_test_p01";
   let pool: Pool;
   let testDb: ReturnType<typeof drizzle<typeof schema>>;
+  let testUserId: number;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     testDb = drizzle(pool, { schema });
+
+    const [created] = await testDb
+      .insert(schema.users)
+      .values({
+        username: "test_code_gen_user",
+        passwordHash: "hash_placeholder",
+        fullName: "Test User For Code Generator",
+        role: "THU_NGAN",
+      })
+      .onConflictDoNothing()
+      .returning({ id: schema.users.id });
+
+    if (created) {
+      testUserId = created.id;
+    } else {
+      const existing = await testDb
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.username, "test_code_gen_user"))
+        .limit(1);
+      testUserId = existing[0].id;
+    }
   });
 
   afterAll(async () => {
@@ -40,7 +64,7 @@ describe("Transaction-based Sequential Code Generator", () => {
 
       await tx.insert(schema.shifts).values({
         shiftCode: code1,
-        cashierId: 1,
+        cashierId: testUserId,
         initialCash: 1000000,
         status: "DANG_MO",
       });
@@ -68,7 +92,7 @@ describe("Transaction-based Sequential Code Generator", () => {
         .insert(schema.shifts)
         .values({
           shiftCode: `CA-${ymd}-99`,
-          cashierId: 1,
+          cashierId: testUserId,
           initialCash: 500000,
           status: "DA_DONG",
         })

@@ -32,6 +32,8 @@ export const shifts = pgTable(
     uniqueIndex("shifts_cashier_active_unique")
       .on(table.cashierId)
       .where(sql`status = 'DANG_MO'`),
+    index("shifts_cashier_id_idx").on(table.cashierId),
+    index("shifts_approved_by_id_idx").on(table.approvedById),
     check("shifts_initial_cash_check", sql`${table.initialCash} >= 0`),
     check("shifts_status_check", sql`${table.status} IN ('DANG_MO', 'CHO_DUYET', 'DA_DONG')`),
   ],

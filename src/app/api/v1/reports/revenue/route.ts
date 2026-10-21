@@ -17,29 +17,37 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = req.nextUrl;
   const targetCashierId = searchParams.get("cashierId");
-  const isSelf = targetCashierId ? Number(targetCashierId) === auth.user.userId : false;
+  const isSelf = targetCashierId
+    ? Number(targetCashierId) === auth.user.userId
+    : auth.user.role === "THU_NGAN";
 
-  // 1. Quản lý has full permission to view general revenue report
+  // 1. Quản lý has full permission to view general revenue report (501 in Phase 01)
   if (can(auth.user.role, "VIEW_GENERAL_REVENUE_REPORT")) {
-    return NextResponse.json({
-      ok: true,
-      scope: "ALL_REVENUE",
-      message: "Báo cáo doanh thu tổng hợp (Quản lý)",
-      data: { totalRevenue: 0, shifts: [] },
-    });
+    return NextResponse.json(
+      {
+        ok: false,
+        scope: "ALL_REVENUE",
+        error: "Chức năng báo cáo doanh thu sẽ được triển khai trong Phase 10",
+        code: "NOT_IMPLEMENTED",
+      },
+      { status: 501 },
+    );
   }
 
-  // 2. Thu ngân can only view revenue for their own shift
+  // 2. Thu ngân can only view revenue for their own shift (501 in Phase 01)
   if (can(auth.user.role, "VIEW_OWN_SHIFT_REVENUE", { isSelf })) {
-    return NextResponse.json({
-      ok: true,
-      scope: "OWN_SHIFT_REVENUE",
-      message: "Báo cáo doanh thu ca cá nhân",
-      data: { cashierId: auth.user.userId, totalRevenue: 0 },
-    });
+    return NextResponse.json(
+      {
+        ok: false,
+        scope: "OWN_SHIFT_REVENUE",
+        error: "Chức năng báo cáo doanh thu sẽ được triển khai trong Phase 10",
+        code: "NOT_IMPLEMENTED",
+      },
+      { status: 501 },
+    );
   }
 
-  // 3. Phục vụ or Thu ngân attempting to view general / other's revenue gets 403
+  // 3. Phục vụ or Thu ngân attempting to view general / other cashier's revenue gets 403
   return NextResponse.json(
     {
       ok: false,

@@ -17,15 +17,22 @@ const STATIC_FILE_REGEX = /\.(ico|png|jpg|jpeg|svg|css|js|map|woff|woff2|webp|tt
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
-  const isAuthRoute = pathname === "/login" || pathname.startsWith("/api/v1/auth/login");
+  const isAdmin = pathname.startsWith("/admin") || pathname.startsWith("/api/v1/admin");
+  const isAuthRoute =
+    pathname === "/login" ||
+    pathname === "/api/v1/auth/login" ||
+    pathname === "/api/v1/auth/logout";
 
-  // 1. Skip static assets and Next.js internal files
-  if (
-    pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico" ||
-    STATIC_FILE_REGEX.test(pathname)
-  ) {
-    return NextResponse.next();
+  // 1. Skip static assets and Next.js internal files (NEVER bypass /api/* or /admin/*)
+  const isProtectedPrefix = isApi || pathname.startsWith("/admin");
+  if (!isProtectedPrefix) {
+    if (
+      pathname.startsWith("/_next") ||
+      pathname === "/favicon.ico" ||
+      STATIC_FILE_REGEX.test(pathname)
+    ) {
+      return NextResponse.next();
+    }
   }
 
   // 2. Strip any spoofed x-user-* headers sent from client
@@ -66,9 +73,7 @@ export async function middleware(req: NextRequest) {
 
   // 6. Role-based protection: Admin management routes strictly require 'QUAN_LY'
   // Note: /api/v1/reports/revenue is handled at route handler level using can()
-  const isAdminRoute = pathname.startsWith("/admin") || pathname.startsWith("/api/v1/admin");
-
-  if (isAdminRoute && user.role !== "QUAN_LY") {
+  if (isAdmin && user.role !== "QUAN_LY") {
     if (isApi) {
       return NextResponse.json(
         {

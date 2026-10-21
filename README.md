@@ -17,6 +17,9 @@ Hệ thống POS bán hàng F&B chuyên nghiệp cho quán ăn, cafe chạy trê
 > [!NOTE]
 > **QUYẾT ĐỊNH THIẾT KẾ XÁC THỰC (JWT COOKIE HTTPONLY)**:
 > Ứng dụng POS sử dụng cookie `pos_token` gắn cờ `httpOnly` và `sameSite: "lax"` thay vì truyền Bearer token trong tiêu đề HTTP (như ghi chú ban đầu tại `ba/09-api.md`). Đây là quyết định kiến trúc có chủ đích dành cho Web App cùng origin (Same-Origin Web POS), giúp chống rò rỉ token qua tấn công XSS, tự động đính kèm phiên làm việc an toàn và tối ưu trải nghiệm chạm trên màn hình cảm ứng.
+>
+> **Thời hạn hiệu lực Token & Đánh đổi bảo mật (Stateless JWT)**:
+> Phiên đăng nhập có thời hạn 7 ngày và được xác thực hoàn toàn không trạng thái (stateless) qua giải thuật mã hóa HS256 mà không truy vấn cơ sở dữ liệu trên mỗi HTTP request. Sự đánh đổi này đem lại hiệu năng phản hồi cực nhanh cho quầy thu ngân và order tại bàn trong giờ cao điểm. Trong trường hợp cần thu hồi quyền ngay lập tức khi tài khoản nhân viên bị khóa, Phase 02+ có thể bổ sung cơ chế kiểm tra `token_version` hoặc danh sách đen (Redis/cache blacklist).
 
 ## 2. Thiết lập môi trường & Chạy dự án
 
@@ -60,15 +63,29 @@ Truy cập: `http://localhost:3000`
 # Chạy Unit & Integration tests
 npm test
 
-# Kiểm tra cú pháp và kiểu dữ liệu
+# Kiểm tra cú pháp và quy chuẩn mã nguồn
 npm run lint
 
 # Kiểm tra kiểu TypeScript
 npx tsc --noEmit
 
-# Build sản phẩm hoàn chỉnh
+# Build sản phẩm hoàn chỉnh (kiểm tra lazy database pool không yêu cầu DB lúc build)
 npm run build
 ```
+
+#### Kiến trúc kiểm thử tự động (Vitest Suite)
+- **Cơ sở dữ liệu kiểm thử độc lập**: Bộ test sử dụng database riêng biệt `pos_test_p01` (khai báo tại `DATABASE_TEST_URL`).
+- **Tự động áp dụng Migration**: Cấu hình `globalSetup` (`tests/setup/global-setup.ts`) tự động chạy toàn bộ migrations lên test database trước khi thực thi bộ test, bảo đảm schema luôn chuẩn xác.
+- **Dữ liệu động (Zero Seed Dependency)**: Các ca kiểm thử tự tạo dữ liệu độc lập (user, area, bàn, ca làm việc) bằng các hàm sinh định danh ngẫu nhiên, không phụ thuộc vào thứ tự ID của seed tĩnh.
+- **Kiểm thử toàn diện**:
+  - `tests/unit/permissions.test.ts`: Ma trận 16 quyền hạn theo ma trận phân quyền F&B (QUAN_LY, THU_NGAN, PHUC_VU).
+  - `tests/unit/money.test.ts`: Làm tròn tiền mặt 1.000đ và định dạng tiền tệ VND.
+  - `tests/unit/error-catalog.test.ts`: Danh mục lỗi song ngữ chuẩn hóa kèm gợi ý xử lý.
+  - `tests/unit/jwt-security.test.ts`: Bảo mật JWT, độ dài secret >= 32 ký tự, xác thực Zod payload.
+  - `tests/unit/code-generator.test.ts`: Sinh mã ca (CA-...) và đơn hàng (HD-...) tuần tự theo ngày an toàn đa luồng.
+  - `tests/unit/schema-constraints.test.ts`: Ràng buộc toàn vẹn PostgreSQL (mã 23505 ca mở/bàn mở, mã 23514 CHECK, mã 23503 khóa ngoại).
+  - `tests/api/auth-login.test.ts`: API đăng nhập, mật khẩu bcrypt, cấp cookie httpOnly, từ chối payload không hợp lệ.
+  - `tests/api/admin-authorization.test.ts`: Chống vượt quyền qua đuôi file tĩnh, loại bỏ header giả mạo, kiểm soát route quản trị.
 
 ## 3. Cấu trúc thư mục
 ```
