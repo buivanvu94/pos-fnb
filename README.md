@@ -47,6 +47,15 @@ npm run db:migrate
 npm run db:seed
 ```
 
+### Nhập thực đơn từ file CSV (Phase 02 - Quản lý thực đơn)
+Hệ thống cung cấp script nhập thực đơn và danh mục từ file CSV trước go-live (SRS mục 10, US-12):
+```bash
+npm run seed:menu -- duong_dan_file.csv
+```
+- **Cấu trúc cột CSV**: `nhom`, `ten`, `gia`, `don vi`, `trang thai` (hoặc `category`, `name`, `price`, `unit`, `status`).
+- **Cơ chế Idempotent**: Định danh duy nhất theo cặp `(nhóm món, tên món)`. Chạy nhiều lần sẽ tự động cập nhật đơn giá, đơn vị tính và trạng thái mà không làm nhân đôi bản ghi.
+- **Ràng buộc nghiệp vụ**: Đơn giá bán phải lớn hơn hoặc bằng 0 VNĐ (ERR-12, BR-14) và tên món không được để trống. Parser CSV tự động xử lý an toàn dấu nháy kép `""` và báo cáo rõ ràng các dòng lỗi nếu có.
+
 Tài khoản mẫu phát triển:
 - **Quản lý**: `quanly` / `123456` (Mã PIN duyệt: `1234`)
 - **Thu ngân**: `thungan` / `123456`
@@ -86,18 +95,23 @@ npm run build
   - `tests/unit/schema-constraints.test.ts`: Ràng buộc toàn vẹn PostgreSQL (mã 23505 ca mở/bàn mở, mã 23514 CHECK, mã 23503 khóa ngoại).
   - `tests/api/auth-login.test.ts`: API đăng nhập, mật khẩu bcrypt, cấp cookie httpOnly, từ chối payload không hợp lệ.
   - `tests/api/admin-authorization.test.ts`: Chống vượt quyền qua đuôi file tĩnh, loại bỏ header giả mạo, kiểm soát route quản trị.
+  - `tests/unit/menu-csv-parser.test.ts`: Parser CSV thực đơn, xử lý nháy kép, phát hiện đơn giá âm (ERR-12) và báo cáo lỗi dòng.
+  - `tests/api/menu-items.test.ts`: API quản lý món ăn, phân quyền QUAN_LY, chặn đơn giá âm, cập nhật trạng thái HET_HANG tức thời.
+  - `tests/api/menu-categories-toppings.test.ts`: API danh mục, món ăn kèm topping và tính idempotent khi seed thực đơn CSV.
+  - `tests/api/menu-images.test.ts`: Upload ảnh món ăn (giới hạn 2MB, định dạng PNG/JPG/WEBP) và chống tấn công path traversal.
 
 ## 3. Cấu trúc thư mục
 ```
 src/
 ├── app/                  # Next.js App Router (login, tables, counter, admin, api)
-├── components/           # UI Ant Design components (AntdProvider, MainLayout)
+├── components/           # UI Ant Design components (AntdProvider, MainLayout, menu)
 ├── db/                   # Drizzle ORM schema, migrations, seed, sequential code generator
 ├── lib/                  # Tiện ích tiền tệ (money), danh mục lỗi (error-catalog), phân quyền (permissions)
-├── server/               # Logic backend, xác thực JWT (require-role, jwt)
+├── server/               # Logic backend, xác thực JWT (require-role, jwt), menu service
 └── theme/                # Cấu hình Ant Design theme token (touch >= 44px, màu trạng thái bàn)
 tests/                    # Bộ kiểm thử tự động Vitest
 docs/                     # Tài liệu kiến trúc và hướng dẫn dự án
+scripts/                  # Scripts tiện ích (seed-menu)
 ```
 
 ## 4. Bảo mật & Xác thực (Security Architecture)
