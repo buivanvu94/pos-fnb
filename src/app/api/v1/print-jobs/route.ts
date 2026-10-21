@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { printJobs, orders } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
+import { sweepStaleSendingJobs, STALE_SENDING_THRESHOLD_MS } from "@/server/printing/print-stale-sweeper";
 
 /**
  * GET /api/v1/print-jobs?status=FAILED (AC-03-2, BR-12)
  * Lists print jobs by status.
+ * Point 1: Automatically invokes sweepStaleSendingJobs and treats stale SENDING (> 60s) as FAILED.
  * Point 9: SQL-level role filtering before LIMIT, omits payload field.
  * - QUAN_LY sees all jobs.
  * - Other staff only see jobs matching their own orders.
@@ -22,12 +24,26 @@ export async function GET(req: NextRequest) {
   const limitParam = Math.min(Number(searchParams.get("limit")) || 50, 100);
 
   try {
+    // Point 1: Sweep stale jobs stuck in SENDING on each listing request
+    await sweepStaleSendingJobs();
+
     const conditions = [];
-    if (statusParam) {
+    if (statusParam === "FAILED") {
+      const staleThreshold = new Date(Date.now() - STALE_SENDING_THRESHOLD_MS);
+      conditions.push(
+        or(
+          eq(printJobs.status, "FAILED"),
+          and(
+            eq(printJobs.status, "SENDING"),
+            sql`${printJobs.updatedAt} < ${staleThreshold}`,
+          ),
+        ),
+      );
+    } else if (statusParam) {
       conditions.push(eq(printJobs.status, statusParam));
     }
 
-    // Point 9: Role filtering in SQL using true ownership column (orders.createdById)
+    // Role filtering in SQL using true ownership column (orders.createdById)
     if (auth.user.role !== "QUAN_LY") {
       conditions.push(eq(orders.createdById, auth.user.userId));
     }

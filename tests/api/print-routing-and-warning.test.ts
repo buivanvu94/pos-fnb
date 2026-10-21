@@ -12,7 +12,7 @@ import { POST as kitchenPrintHandler } from "@/app/api/v1/orders/kitchen-print/r
 import { POST as retryPrintJobHandler } from "@/app/api/v1/print-jobs/[id]/retry/route";
 import { GET as listPrintJobsHandler } from "@/app/api/v1/print-jobs/route";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
-import { savePrinterSettings } from "@/server/printing/settings-service";
+import { savePrinterSettings, getPrinterSettings, type PrinterSettings } from "@/server/printing/settings-service";
 
 describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)", () => {
   const testDbUrl = getTestDbUrl();
@@ -33,6 +33,7 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
 
   let kitchenItemId: number;
   let barItemId: number;
+  let initialSettings: PrinterSettings;
 
   let mockServer: net.Server;
   let mockPort: number;
@@ -50,6 +51,8 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
+
+    initialSettings = await getPrinterSettings();
 
     // Configure 127.0.0.1 in settings so unreachable tests fail instantly (ECONNREFUSED) without 2s delays
     await db
@@ -155,7 +158,11 @@ describe("Print Routing, Warnings & Retry API (DEC-07, AC-03-2, ERR-06, API-02)"
 
       // Point 10: Clean up printJobs and restore settings
       await db.delete(schema.printJobs).where(inArray(schema.printJobs.targetPrinter, ["KITCHEN", "BAR", "RECEIPT"]));
-      await savePrinterSettings({ kitchenIp: "", barIp: "", receiptIp: "" });
+      await savePrinterSettings({
+        kitchenIp: initialSettings.kitchenIp,
+        barIp: initialSettings.barIp,
+        receiptIp: initialSettings.receiptIp,
+      });
     }
     await pool.end();
   });

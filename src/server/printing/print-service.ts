@@ -6,6 +6,10 @@ import { getPrinterSettings } from "./settings-service";
 import { compilePrintPayloadToEscpos } from "./render-engine";
 import { sendToPrinter } from "./tcp-printer";
 import { parsePrinterAddress } from "./printer-address-validator";
+import { sweepStaleSendingJobs, STALE_SENDING_THRESHOLD_MS } from "./print-stale-sweeper";
+import { resolveStationAddress, populatePayloadDefaults } from "./print-station-resolver";
+
+export { sweepStaleSendingJobs } from "./print-stale-sweeper";
 
 export type PrintJobType =
   | "KOT_KITCHEN"
@@ -32,9 +36,12 @@ export interface DispatchResult {
   warningMessage?: string;
 }
 
-/**
- * Enqueues a new print job with status PENDING inside (or outside) an active transaction.
- */
+let hasSweptOnStartup = false;
+
+export function resetStartupSweepFlag(): void {
+  hasSweptOnStartup = false;
+}
+
 export async function enqueuePrintJob(
   params: EnqueueJobParams,
   txInstance: any = db,
@@ -56,9 +63,6 @@ export async function enqueuePrintJob(
   return job;
 }
 
-/**
- * Safely updates a print job to FAILED without throwing errors if the DB update fails.
- */
 async function safeMarkJobFailed(jobId: number, errorMessage: string): Promise<void> {
   try {
     await db
@@ -68,24 +72,23 @@ async function safeMarkJobFailed(jobId: number, errorMessage: string): Promise<v
         errorMessage: errorMessage.slice(0, 500),
         updatedAt: new Date(),
       })
-      .where(eq(printJobs.id, jobId));
+      .where(and(eq(printJobs.id, jobId), eq(printJobs.status, "SENDING")));
   } catch (dbErr) {
     console.error(`Failed to mark print job ${jobId} as FAILED in DB:`, dbErr);
   }
 }
 
-/**
- * Dispatches an enqueued print job to the physical LAN printer.
- * Atomic claim (Point 2): transitions to SENDING and increments retry_count in SQL.
- * Complete failure isolation (Point 1): never throws an unhandled rejection.
- */
 export async function dispatchPrintJob(jobId: number): Promise<DispatchResult> {
+  if (!hasSweptOnStartup) {
+    hasSweptOnStartup = true;
+    await sweepStaleSendingJobs();
+  }
+
   let claimedJob: PrintJob | undefined;
 
   try {
     const now = new Date();
-    // Crashed SENDING jobs older than 60s can be reclaimed (Point 2)
-    const staleThreshold = new Date(Date.now() - 60000);
+    const staleThreshold = new Date(Date.now() - STALE_SENDING_THRESHOLD_MS);
 
     const [job] = await db
       .update(printJobs)
@@ -120,75 +123,28 @@ export async function dispatchPrintJob(jobId: number): Promise<DispatchResult> {
     };
   }
 
-  // If another worker/process already claimed or already SENT this job
   if (!claimedJob) {
     return { ok: true, jobId, status: "ALREADY_HANDLED" };
   }
 
-  const isReceipt = claimedJob.targetPrinter === "RECEIPT";
-  const defaultWarning = isReceipt
-    ? ERROR_CATALOG.ERR_10.message
-    : ERROR_CATALOG.ERR_06.message;
+  const settings = await getPrinterSettings();
+  const station = resolveStationAddress(claimedJob, settings);
 
   try {
-    const settings = await getPrinterSettings();
-
-    // Resolve target station and IP
-    let targetIp = settings.kitchenIp;
-    let stationName = "Bếp";
-    if (claimedJob.targetPrinter === "BAR") {
-      targetIp = settings.barIp;
-      stationName = "Quầy Bar";
-    } else if (claimedJob.targetPrinter === "RECEIPT") {
-      targetIp = settings.receiptIp;
-      stationName = "Hóa đơn";
-    }
-
-    // Point 5: If printer IP is unconfigured, fail explicitly with Vietnamese message and ERR-06
-    if (!targetIp || targetIp.trim() === "") {
-      const errMsg = `Chưa cấu hình IP cho máy in ${stationName}`;
+    if (!station.targetIp || station.targetIp.trim() === "") {
+      const errMsg = `Chưa cấu hình IP cho máy in ${station.stationName}`;
       await safeMarkJobFailed(jobId, errMsg);
-      return {
-        ok: false,
-        jobId,
-        status: "FAILED",
-        error: errMsg,
-        warningMessage: defaultWarning,
-      };
+      return { ok: false, jobId, status: "FAILED", error: errMsg, warningMessage: station.defaultWarning };
     }
 
-    // Point 3: Validate and parse printer address strictly at dispatch time
-    const parsedAddr = parsePrinterAddress(targetIp);
+    const parsedAddr = parsePrinterAddress(station.targetIp);
     if (!parsedAddr.ok) {
-      const errMsg = `Địa chỉ máy in ${stationName} không hợp lệ: ${parsedAddr.error}`;
+      const errMsg = `Địa chỉ máy in ${station.stationName} không hợp lệ: ${parsedAddr.error}`;
       await safeMarkJobFailed(jobId, errMsg);
-      return {
-        ok: false,
-        jobId,
-        status: "FAILED",
-        error: errMsg,
-        warningMessage: defaultWarning,
-      };
+      return { ok: false, jobId, status: "FAILED", error: errMsg, warningMessage: station.defaultWarning };
     }
 
-    let payloadObj: Record<string, any> = {};
-    try {
-      payloadObj = JSON.parse(claimedJob.payload);
-    } catch {
-      payloadObj = {};
-    }
-
-    // Inject store defaults if missing
-    if (!payloadObj.storeName) payloadObj.storeName = settings.storeName;
-    if (!payloadObj.storeAddress) payloadObj.storeAddress = settings.storeAddress;
-    if (!payloadObj.storePhone) payloadObj.storePhone = settings.storePhone;
-    if (!payloadObj.storeLogoPath && settings.storeLogo) payloadObj.storeLogoPath = settings.storeLogo;
-    if (!payloadObj.wifiSsid) {
-      payloadObj.wifiSsid = settings.wifiSsid;
-      payloadObj.wifiPassword = settings.wifiPassword;
-      payloadObj.wifiSecurity = settings.wifiSecurity;
-    }
-
+    const payloadObj = populatePayloadDefaults(claimedJob.payload, settings);
     const escposBytes = await compilePrintPayloadToEscpos(payloadObj, {
       paperWidth: settings.paperWidth,
       enableDrawerKick: settings.drawerEnabled,
@@ -201,11 +157,14 @@ export async function dispatchPrintJob(jobId: number): Promise<DispatchResult> {
       timeoutMs: 2000,
     });
 
-    // Successfully sent to printer
-    await db
-      .update(printJobs)
-      .set({ status: "SENT", updatedAt: new Date(), errorMessage: null })
-      .where(eq(printJobs.id, jobId));
+    try {
+      await db
+        .update(printJobs)
+        .set({ status: "SENT", updatedAt: new Date(), errorMessage: null })
+        .where(and(eq(printJobs.id, jobId), eq(printJobs.status, "SENDING")));
+    } catch (sentDbErr) {
+      console.error(`Failed to record SENT status for job ${jobId} in DB:`, sentDbErr);
+    }
 
     return { ok: true, jobId, status: "SENT" };
   } catch (err: any) {
@@ -218,14 +177,11 @@ export async function dispatchPrintJob(jobId: number): Promise<DispatchResult> {
       jobId,
       status: "FAILED",
       error: errMsg,
-      warningMessage: defaultWarning,
+      warningMessage: station.defaultWarning,
     };
   }
 }
 
-/**
- * Retries a previously failed print job (AC-03-2, BR-12).
- */
 export async function retryPrintJob(jobId: number): Promise<DispatchResult> {
   return await dispatchPrintJob(jobId);
 }

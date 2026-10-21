@@ -5,23 +5,27 @@ export interface SendToPrinterOptions {
   port?: number;
   data: Buffer;
   timeoutMs?: number;
+  onSocket?: (socket: net.Socket) => void;
 }
 
 /**
  * Sends ESC/POS byte buffers to a network thermal printer over raw TCP.
  * Enforces strict connection & write timeout (2000ms).
- * Resolves promptly as soon as socket.write callback reports success
- * without waiting for remote FIN/close (Point 4).
+ * Resolves promptly upon write callback completion and cleans up the client socket (Point 3 & 4).
  */
 export async function sendToPrinter({
   ip,
   port = 9100,
   data,
   timeoutMs = 2000,
+  onSocket,
 }: SendToPrinterOptions): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const socket = new net.Socket();
+    if (onSocket) {
+      onSocket(socket);
+    }
 
     const cleanupAndReject = (err: Error) => {
       if (!settled) {
@@ -35,6 +39,11 @@ export async function sendToPrinter({
       if (!settled) {
         settled = true;
         socket.end();
+        if (typeof (socket as any).destroySoon === "function") {
+          (socket as any).destroySoon();
+        } else {
+          socket.destroy();
+        }
         resolve();
       }
     };
@@ -42,6 +51,7 @@ export async function sendToPrinter({
     socket.setTimeout(timeoutMs);
 
     socket.on("timeout", () => {
+      socket.destroy();
       cleanupAndReject(
         new Error(`Timeout: Không thể kết nối tới máy in qua ${ip}:${port} sau ${timeoutMs}ms`),
       );
@@ -56,7 +66,6 @@ export async function sendToPrinter({
         if (writeErr) {
           cleanupAndReject(writeErr);
         } else {
-          // Point 4: resolve immediately upon write completion
           cleanupAndResolve();
         }
       });

@@ -8,7 +8,7 @@ import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { enqueuePrintJob, dispatchPrintJob } from "@/server/printing/print-service";
-import { savePrinterSettings } from "@/server/printing/settings-service";
+import { savePrinterSettings, getPrinterSettings, type PrinterSettings } from "@/server/printing/settings-service";
 import { POST as retryPrintJobHandler } from "@/app/api/v1/print-jobs/[id]/retry/route";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 
@@ -28,12 +28,14 @@ describe("Print Queue, Atomic Claim & Retry Authorization Unit Tests (Point 2 & 
   let waiterUserId: number;
   let managerToken: string;
   let managerUserId: number;
+  let initialSettings: PrinterSettings;
 
   const createdJobIds: number[] = [];
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
+    initialSettings = await getPrinterSettings();
 
     // Mock printer on port 9106
     await new Promise<void>((resolve) => {
@@ -80,9 +82,9 @@ describe("Print Queue, Atomic Claim & Retry Authorization Unit Tests (Point 2 & 
 
       // Point 10: Restore printer settings
       await savePrinterSettings({
-        kitchenIp: "",
-        barIp: "",
-        receiptIp: "",
+        kitchenIp: initialSettings.kitchenIp,
+        barIp: initialSettings.barIp,
+        receiptIp: initialSettings.receiptIp,
       });
     }
     await pool.end();

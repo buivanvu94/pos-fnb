@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { printJobs } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
 import { retryPrintJob } from "@/server/printing/print-service";
+import { isStaleSendingJob } from "@/server/printing/print-stale-sweeper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -11,8 +12,9 @@ interface RouteParams {
 
 /**
  * POST /api/v1/print-jobs/:id/retry (AC-03-2, BR-12)
- * Retries a previously failed thermal print job.
- * Point 2: Only FAILED jobs can be retried (409 for other statuses).
+ * Retries a previously failed or crashed thermal print job.
+ * Point 1: Accepts FAILED status, or SENDING status with updatedAt > 60s.
+ * Fresh SENDING returns 409 Conflict with in-progress message.
  * PHUC_VU can only retry kitchen/bar tickets; QUAN_LY and THU_NGAN can retry all.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
@@ -43,12 +45,24 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     );
   }
 
-  // Point 2: Only allow retrying jobs with FAILED status
+  // Point 1: Allow FAILED or stale SENDING (> 60s)
   if (job.status !== "FAILED") {
-    return NextResponse.json(
-      { ok: false, error: `Không thể thử in lại lệnh in ở trạng thái ${job.status} (chỉ cho phép FAILED)` },
-      { status: 409 },
-    );
+    if (job.status === "SENDING") {
+      if (!isStaleSendingJob(job)) {
+        return NextResponse.json(
+          { ok: false, error: "Lệnh in đang được xử lý, vui lòng chờ" },
+          { status: 409 },
+        );
+      }
+    } else {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Không thể thử in lại lệnh in ở trạng thái ${job.status} (chỉ cho phép FAILED hoặc SENDING quá 60s)`,
+        },
+        { status: 409 },
+      );
+    }
   }
 
   // Point 2: PHUC_VU can only retry kitchen/bar tickets

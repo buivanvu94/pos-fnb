@@ -59,6 +59,10 @@ export async function getPrinterSettings(): Promise<PrinterSettings> {
   const paperWidthRaw = Number(map.get(SETTING_KEYS.PAPER_WIDTH));
   const paperWidth: 80 | 58 = paperWidthRaw === 58 ? 58 : 80;
 
+  const rawLogo = map.get(SETTING_KEYS.STORE_LOGO) || "";
+  // Point 6: Multi-layer defense for logo; discard if filename fails strict regex
+  const storeLogo = rawLogo && LOGO_FILENAME_REGEX.test(rawLogo) ? rawLogo : "";
+
   // Point 5: Removed hardcoded default IPs and Wi-Fi password. Default is empty string "".
   return {
     kitchenIp: map.get(SETTING_KEYS.KITCHEN_IP) || process.env.PRINTER_KITCHEN_IP || "",
@@ -68,7 +72,7 @@ export async function getPrinterSettings(): Promise<PrinterSettings> {
     storeName: map.get(SETTING_KEYS.STORE_NAME) || "POS Cafe & Restaurant",
     storeAddress: map.get(SETTING_KEYS.STORE_ADDRESS) || "123 Đường Nguyễn Huệ, Quận 1, TP.HCM",
     storePhone: map.get(SETTING_KEYS.STORE_PHONE) || "0901234567",
-    storeLogo: map.get(SETTING_KEYS.STORE_LOGO) || "",
+    storeLogo,
     wifiSsid: map.get(SETTING_KEYS.WIFI_SSID) || "",
     wifiPassword: map.get(SETTING_KEYS.WIFI_PASSWORD) || "",
     wifiSecurity: map.get(SETTING_KEYS.WIFI_SECURITY) || "WPA",

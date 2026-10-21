@@ -7,7 +7,7 @@ import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
 import { sendKitchenOrder } from "@/server/orders/send-kitchen-service";
 import { retryPrintJob, enqueuePrintJob } from "@/server/printing/print-service";
-import { savePrinterSettings } from "@/server/printing/settings-service";
+import { savePrinterSettings, getPrinterSettings, type PrinterSettings } from "@/server/printing/settings-service";
 
 describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
   const testDbUrl = getTestDbUrl();
@@ -26,12 +26,14 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
   let testTableId: number;
   let testShiftId: number;
   let testMenuItemId: number;
+  let initialSettings: PrinterSettings;
 
   const createdJobIds: number[] = [];
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
+    initialSettings = await getPrinterSettings();
 
     // 1. Start mock TCP socket server on restricted printer port 9104
     mockPort = 9104;
@@ -119,9 +121,9 @@ describe("Mock TCP Printer & NFR-02 Performance Verification", () => {
 
       // Point 10: Restore settings
       await savePrinterSettings({
-        kitchenIp: "",
-        barIp: "",
-        receiptIp: "",
+        kitchenIp: initialSettings.kitchenIp,
+        barIp: initialSettings.barIp,
+        receiptIp: initialSettings.receiptIp,
       });
     }
     await pool.end();

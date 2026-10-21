@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import net from "net";
 import { sendToPrinter } from "@/server/printing/tcp-printer";
 
-describe("TCP Printer Unit Tests (Point 4)", () => {
+describe("TCP Printer Unit Tests (Point 3 & 4)", () => {
   let mockServer: net.Server | undefined;
   const mockPort = 9107;
 
@@ -12,10 +12,9 @@ describe("TCP Printer Unit Tests (Point 4)", () => {
     }
   });
 
-  it("succeeds promptly when mock printer does NOT close connection after receiving bytes (Point 4)", async () => {
+  it("succeeds promptly and cleans up client socket when mock printer does NOT close connection (Point 3 & 4)", async () => {
     let receivedBytes = 0;
 
-    // Start a mock server that intentionally never calls socket.end() or socket.destroy()
     await new Promise<void>((resolve) => {
       mockServer = net.createServer((socket) => {
         socket.on("data", (chunk) => {
@@ -28,24 +27,48 @@ describe("TCP Printer Unit Tests (Point 4)", () => {
 
     const testPayload = Buffer.from([0x1b, 0x40, 0x1d, 0x56, 0x42, 0x00]);
     const start = performance.now();
+    let clientSocket: net.Socket | undefined;
 
-    // sendToPrinter must resolve immediately upon write flush without waiting for remote FIN
     await expect(
       sendToPrinter({
         ip: "127.0.0.1",
         port: mockPort,
         data: testPayload,
         timeoutMs: 2000,
+        onSocket: (s) => {
+          clientSocket = s;
+        },
       }),
     ).resolves.toBeUndefined();
 
     const elapsed = performance.now() - start;
-
-    // Must resolve almost instantaneously (< 500ms), NOT hanging for 2000ms timeout
     expect(elapsed).toBeLessThan(500);
 
-    // Allow mock server event loop to receive the chunk
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Allow mock server event loop to receive the chunk and client destroySoon to settle
+    await new Promise((resolve) => setTimeout(resolve, 60));
     expect(receivedBytes).toBe(testPayload.length);
+
+    // Point 3: Client socket must be cleaned up (destroyed) even if server leaves connection open
+    expect(clientSocket).toBeDefined();
+    expect(clientSocket!.destroyed).toBe(true);
+  });
+
+  it("destroys client socket when connection times out (Point 3)", async () => {
+    // Unreachable loopback IP on port that drops / doesn't respond
+    let clientSocket: net.Socket | undefined;
+
+    const timeoutPromise = sendToPrinter({
+      ip: "10.255.255.1", // Non-routable private IP causing timeout
+      port: 9100,
+      data: Buffer.from([0x00]),
+      timeoutMs: 100,
+      onSocket: (s) => {
+        clientSocket = s;
+      },
+    });
+
+    await expect(timeoutPromise).rejects.toThrow(/Timeout/);
+    expect(clientSocket).toBeDefined();
+    expect(clientSocket!.destroyed).toBe(true);
   });
 });

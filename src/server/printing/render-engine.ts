@@ -8,6 +8,7 @@ import { renderKotCanvas, renderKotCancelCanvas } from "./templates/render-kot";
 import { renderProvisionalCanvas } from "./templates/render-provisional";
 import { renderFinalReceiptCanvas } from "./templates/render-final-receipt";
 import { renderCashReceiptCanvas, renderZReportCanvas } from "./templates/render-cash-z";
+import { LOGO_FILENAME_REGEX } from "./settings-service";
 
 export type PaperWidth = 80 | 58;
 
@@ -25,13 +26,21 @@ export async function renderPayloadToCanvas(
   const width = getDotWidth(paperWidth);
   const p = { ...(payload as Record<string, any>) };
 
-  // Point 6: Resolve store logo filepath from filename
-  if (p.storeLogo && !p.storeLogoPath) {
-    p.storeLogoPath = path.isAbsolute(p.storeLogo)
-      ? p.storeLogo
-      : path.join(process.cwd(), "uploads", "logo", p.storeLogo);
-  } else if (p.storeLogoPath && !path.isAbsolute(p.storeLogoPath)) {
-    p.storeLogoPath = path.join(process.cwd(), "uploads", "logo", p.storeLogoPath);
+  // Point 6: Multi-layer defense for store logo; validate filename regex before resolving path
+  let safeLogoFilename: string | undefined;
+  if (p.storeLogo) {
+    const base = path.basename(p.storeLogo);
+    if (LOGO_FILENAME_REGEX.test(base)) safeLogoFilename = base;
+  } else if (p.storeLogoPath) {
+    const base = path.basename(p.storeLogoPath);
+    if (LOGO_FILENAME_REGEX.test(base)) safeLogoFilename = base;
+  }
+
+  if (safeLogoFilename) {
+    p.storeLogoPath = path.join(process.cwd(), "uploads", "logo", safeLogoFilename);
+  } else {
+    p.storeLogoPath = undefined;
+    p.storeLogo = undefined;
   }
 
   // Normalize Phase 03 cash receipts without explicit 'kind'

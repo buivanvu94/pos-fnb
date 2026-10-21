@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { eq, inArray } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import { GET as getSettingsHandler, PUT as putSettingsHandler } from "@/app/api/v1/settings/printers/route";
-import { savePrinterSettings } from "@/server/printing/settings-service";
+import { savePrinterSettings, getPrinterSettings, type PrinterSettings } from "@/server/printing/settings-service";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { getTestDbUrl } from "../setup/test-config";
 
@@ -20,6 +20,7 @@ describe("Printer & Store Settings API (Anti-SSRF & RBAC)", () => {
   let managerUserId: number;
   let cashierUserId: number;
   let waiterUserId: number;
+  let initialSettings: PrinterSettings;
 
   const rand = () => Math.random().toString(36).slice(2, 8);
   const tag = rand();
@@ -27,6 +28,7 @@ describe("Printer & Store Settings API (Anti-SSRF & RBAC)", () => {
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
+    initialSettings = await getPrinterSettings();
 
     const [mgr] = await db
       .insert(schema.users)
@@ -55,9 +57,9 @@ describe("Printer & Store Settings API (Anti-SSRF & RBAC)", () => {
       await db.delete(schema.users).where(inArray(schema.users.id, [managerUserId, cashierUserId, waiterUserId]));
       // Point 10: Restore settings
       await savePrinterSettings({
-        kitchenIp: "",
-        barIp: "",
-        receiptIp: "",
+        kitchenIp: initialSettings.kitchenIp,
+        barIp: initialSettings.barIp,
+        receiptIp: initialSettings.receiptIp,
       });
     }
     await pool.end();
