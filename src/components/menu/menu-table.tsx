@@ -28,6 +28,20 @@ export function MenuTable({
 }: MenuTableProps) {
   const { message } = App.useApp();
   const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [localSearch, setLocalSearch] = useState(search);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== search) {
+        onSearchChange(localSearch);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [localSearch, search, onSearchChange]);
+
+  React.useEffect(() => {
+    setLocalSearch(search);
+  }, [search]);
 
   const handleToggleStatus = async (item: MenuItemRow, checked: boolean) => {
     // checked = true means DANG_BAN, false means HET_HANG
@@ -153,12 +167,12 @@ export function MenuTable({
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <Input
-          prefix={<SearchOutlined style={{ color: "#bfbfbf" }} />}
+        <Input.Search
           placeholder="Tìm kiếm theo tên món hoặc mã món..."
           allowClear
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
+          value={localSearch}
+          onChange={(e) => setLocalSearch(e.target.value)}
+          onSearch={(val) => onSearchChange(val)}
           style={{ maxWidth: 360, height: 40 }}
         />
       </div>

@@ -1,4 +1,5 @@
 import { ERROR_CATALOG } from "@/lib/error-catalog";
+import { MAX_PRICE, MAX_PRICE_MESSAGE } from "./menu-schema";
 
 export interface ParsedMenuItem {
   categoryName: string;
@@ -19,14 +20,19 @@ export interface ParseMenuCsvResult {
   errors: CsvLineError[];
 }
 
-/**
- * Standard RFC-4180 compliant CSV parser with quote escaping support.
- */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
+interface RawRow {
+  fields: string[];
+  line: number;
+}
+
+export function parseCsvRows(text: string): { rows: RawRow[]; parseError?: CsvLineError } {
+  const rows: RawRow[] = [];
   let currentRow: string[] = [];
   let currentField = "";
   let inQuotes = false;
+  let quoteStartLine = 1;
+  let currentLine = 1;
+  let rowStartLine = 1;
   let i = 0;
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 
@@ -42,12 +48,14 @@ export function parseCsv(text: string): string[][] {
           i++;
         }
       } else {
+        if (char === "\n") currentLine++;
         currentField += char;
         i++;
       }
     } else {
       if (char === '"') {
         inQuotes = true;
+        quoteStartLine = currentLine;
         i++;
       } else if (char === ",") {
         currentRow.push(currentField);
@@ -55,10 +63,12 @@ export function parseCsv(text: string): string[][] {
         i++;
       } else if (char === "\r" || char === "\n") {
         if (char === "\r" && src[i + 1] === "\n") i++;
+        currentLine++;
         currentRow.push(currentField);
-        rows.push(currentRow);
+        rows.push({ fields: currentRow, line: rowStartLine });
         currentRow = [];
         currentField = "";
+        rowStartLine = currentLine;
         i++;
       } else {
         currentField += char;
@@ -67,15 +77,69 @@ export function parseCsv(text: string): string[][] {
     }
   }
 
+  if (inQuotes) {
+    return { rows, parseError: { line: quoteStartLine, error: "Dấu ngoặc kép mở nhưng không đóng" } };
+  }
+
   if (currentField.length > 0 || currentRow.length > 0) {
     currentRow.push(currentField);
-    rows.push(currentRow);
+    rows.push({ fields: currentRow, line: rowStartLine });
   }
-  return rows;
+
+  return { rows };
+}
+
+export function parseCsv(text: string): string[][] {
+  const { rows } = parseCsvRows(text);
+  return rows.map((r) => r.fields);
+}
+
+function parsePrice(raw: string): { price?: number; error?: string } {
+  const s = raw.trim();
+  if (!s) return { error: "Đơn giá không được để trống" };
+
+  if (/^-?\d+$/.test(s)) {
+    if (s.startsWith("-")) return { error: ERROR_CATALOG.ERR_12.message };
+    const val = parseInt(s, 10);
+    if (val > MAX_PRICE) return { error: MAX_PRICE_MESSAGE };
+    return { price: val };
+  }
+
+  if (/^\d{1,3}(\.\d{3})+$/.test(s) || /^\d{1,3}(,\d{3})+$/.test(s)) {
+    const val = parseInt(s.replace(/[.,]/g, ""), 10);
+    if (val > MAX_PRICE) return { error: MAX_PRICE_MESSAGE };
+    return { price: val };
+  }
+
+  if (/^-\d{1,3}([.,]\d{3})+$/.test(s)) {
+    return { error: ERROR_CATALOG.ERR_12.message };
+  }
+
+  return { error: "Đơn giá không hợp lệ (không chấp nhận số thập phân hoặc sai định dạng)" };
+}
+
+function parseStatus(raw: string): { status?: "DANG_BAN" | "HET_HANG"; error?: string } {
+  const s = raw.trim();
+  if (!s) return { status: "DANG_BAN" };
+  const clean = s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/\s+/g, "_");
+  if (clean === "dang_ban") return { status: "DANG_BAN" };
+  if (clean === "het_hang") return { status: "HET_HANG" };
+  return { error: "Trạng thái không hợp lệ (chỉ chấp nhận Đang bán hoặc Hết hàng)" };
 }
 
 function normalizeHeader(header: string): string {
-  const clean = header.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  const clean = header
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/[^a-z0-9]/g, "");
   if (clean.includes("nhom") || clean.includes("danhmuc") || clean.includes("category")) return "category";
   if (clean.includes("ten") || clean.includes("mon") || clean.includes("name")) return "name";
   if (clean.includes("gia") || clean.includes("dongia") || clean.includes("price")) return "price";
@@ -84,19 +148,15 @@ function normalizeHeader(header: string): string {
   return clean;
 }
 
-/**
- * Parses menu CSV content and validates each row according to BR-14, ERR-12.
- */
 export function parseMenuCsv(content: string): ParseMenuCsvResult {
-  const rows = parseCsv(content);
+  const { rows, parseError } = parseCsvRows(content);
   const items: ParsedMenuItem[] = [];
   const errors: CsvLineError[] = [];
 
-  if (rows.length === 0) {
-    return { items, errors: [{ line: 1, error: "File CSV rỗng" }] };
-  }
+  if (parseError) errors.push(parseError);
+  if (rows.length === 0) return { items, errors: [{ line: 1, error: "File CSV rỗng" }] };
 
-  const headerRow = rows[0];
+  const headerRow = rows[0].fields;
   let catIdx = -1, nameIdx = -1, priceIdx = -1, unitIdx = -1, statusIdx = -1;
 
   for (let c = 0; c < headerRow.length; c++) {
@@ -120,15 +180,14 @@ export function parseMenuCsv(content: string): ParseMenuCsvResult {
   }
 
   for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const line = r + 1;
+    const { fields: row, line } = rows[r];
     if (row.length === 0 || (row.length === 1 && !row[0].trim())) continue;
 
     const categoryName = (row[catIdx] ?? "").trim();
     const name = (row[nameIdx] ?? "").trim();
     const rawPrice = (row[priceIdx] ?? "").trim();
     const unit = unitIdx !== -1 && row[unitIdx] ? row[unitIdx].trim() : "Phần";
-    const rawStatus = statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim() : "DANG_BAN";
+    const rawStatus = statusIdx !== -1 && row[statusIdx] ? row[statusIdx].trim() : "";
 
     if (!categoryName) {
       errors.push({ line, error: "Nhóm món không được để trống" });
@@ -139,22 +198,26 @@ export function parseMenuCsv(content: string): ParseMenuCsvResult {
       continue;
     }
 
-    const cleanPrice = rawPrice.replace(/[^\d-]/g, "");
-    if (!cleanPrice) {
-      errors.push({ line, error: "Đơn giá không được để trống" });
+    const priceResult = parsePrice(rawPrice);
+    if (priceResult.error || priceResult.price === undefined) {
+      errors.push({ line, error: priceResult.error || ERROR_CATALOG.ERR_12.message });
       continue;
     }
 
-    const parsedPrice = parseInt(cleanPrice, 10);
-    if (isNaN(parsedPrice) || parsedPrice < 0) {
-      errors.push({ line, error: ERROR_CATALOG.ERR_12.message });
+    const statusResult = parseStatus(rawStatus);
+    if (statusResult.error || !statusResult.status) {
+      errors.push({ line, error: statusResult.error || "Trạng thái không hợp lệ" });
       continue;
     }
 
-    const normStatus = rawStatus.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const status = normStatus.includes("het") || normStatus.includes("khong") ? "HET_HANG" : "DANG_BAN";
-
-    items.push({ categoryName, name, price: parsedPrice, unit: unit || "Phần", status, lineNumber: line });
+    items.push({
+      categoryName,
+      name,
+      price: priceResult.price,
+      unit: unit || "Phần",
+      status: statusResult.status,
+      lineNumber: line,
+    });
   }
 
   return { items, errors };

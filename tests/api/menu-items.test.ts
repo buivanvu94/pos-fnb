@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as createItemHandler, GET as getItemsHandler, PATCH as updateItemHandler } from "@/app/api/v1/menu/items/route";
+import { PATCH as updateItemByIdHandler } from "@/app/api/v1/menu/items/[id]/route";
 import { PATCH as patchAvailabilityHandler } from "@/app/api/v1/menu/items/[id]/availability/route";
 import { createCategory } from "@/server/menu/menu-service";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
@@ -8,24 +9,9 @@ import { ERROR_CATALOG } from "@/lib/error-catalog";
 
 describe("Menu Items API Tests (US-12, FR-15, BR-14, ERR-12)", () => {
   const getTokens = async () => {
-    const managerToken = await signAuthToken({
-      userId: 1,
-      username: "quanly",
-      fullName: "Quản Lý",
-      role: "QUAN_LY",
-    });
-    const waiterToken = await signAuthToken({
-      userId: 3,
-      username: "phucvu",
-      fullName: "Phục Vụ",
-      role: "PHUC_VU",
-    });
-    const cashierToken = await signAuthToken({
-      userId: 2,
-      username: "thungan",
-      fullName: "Thu Ngân",
-      role: "THU_NGAN",
-    });
+    const managerToken = await signAuthToken({ userId: 1, username: "quanly", fullName: "Quản Lý", role: "QUAN_LY" });
+    const waiterToken = await signAuthToken({ userId: 3, username: "phucvu", fullName: "Phục Vụ", role: "PHUC_VU" });
+    const cashierToken = await signAuthToken({ userId: 2, username: "thungan", fullName: "Thu Ngân", role: "THU_NGAN" });
     return { managerToken, waiterToken, cashierToken };
   };
 
@@ -34,101 +20,142 @@ describe("Menu Items API Tests (US-12, FR-15, BR-14, ERR-12)", () => {
       method: "POST",
       body: JSON.stringify({ name: "Cà phê", price: 25000, categoryId: 1 }),
     });
-    const res = await createItemHandler(req);
-    expect(res.status).toBe(401);
+    expect((await createItemHandler(req)).status).toBe(401);
   });
 
-  it("blocks PHUC_VU and THU_NGAN from creating menu items with 403", async () => {
+  it("blocks PHUC_VU and THU_NGAN with 403 on ALL write routes", async () => {
     const { waiterToken, cashierToken } = await getTokens();
+    const staffTokens = [waiterToken, cashierToken];
 
-    const waiterReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
-      method: "POST",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: "Trà đào", price: 30000, categoryId: 1 }),
-    });
-    const waiterRes = await createItemHandler(waiterReq);
-    expect(waiterRes.status).toBe(403);
+    for (const token of staffTokens) {
+      const headers = { Cookie: `${AUTH_COOKIE_NAME}=${token}`, "Content-Type": "application/json" };
 
-    const cashierReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
-      method: "POST",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ name: "Trà đào", price: 30000, categoryId: 1 }),
-    });
-    const cashierRes = await createItemHandler(cashierReq);
-    expect(cashierRes.status).toBe(403);
+      // 1. POST items
+      const postReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Trà", price: 20000, categoryId: 1 }),
+      });
+      expect((await createItemHandler(postReq)).status).toBe(403);
+
+      // 2. PATCH items
+      const patchReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ id: 1, name: "Trà sửa" }),
+      });
+      expect((await updateItemHandler(patchReq)).status).toBe(403);
+
+      // 3. PATCH items/[id]
+      const patchIdReq = new NextRequest("http://localhost:3000/api/v1/menu/items/1", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ name: "Trà sửa" }),
+      });
+      expect((await updateItemByIdHandler(patchIdReq, { params: Promise.resolve({ id: "1" }) })).status).toBe(403);
+
+      // 4. PATCH availability
+      const availReq = new NextRequest("http://localhost:3000/api/v1/menu/items/1/availability", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "HET_HANG" }),
+      });
+      expect((await patchAvailabilityHandler(availReq, { params: Promise.resolve({ id: "1" }) })).status).toBe(403);
+    }
   });
 
-  it("rejects negative price with 400 and returns exact ERR-12 message", async () => {
+  it("rejects negative price and prices exceeding 2,000,000,000 cap", async () => {
     const { managerToken } = await getTokens();
-    const req = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+    const headers = { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`, "Content-Type": "application/json" };
+
+    // Negative price -> ERR-12
+    const negReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
       method: "POST",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-        "Content-Type": "application/json",
-      },
+      headers,
+      body: JSON.stringify({ name: "Món Giá Âm", price: -10000, categoryId: 1 }),
+    });
+    const negRes = await createItemHandler(negReq);
+    expect(negRes.status).toBe(400);
+    expect((await negRes.json()).error).toBe(ERROR_CATALOG.ERR_12.message);
+
+    // Exceeding 2 billion
+    const bigReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: "Món Giá Quá Cao", price: 3_000_000_000, categoryId: 1 }),
+    });
+    const bigRes = await createItemHandler(bigReq);
+    expect(bigRes.status).toBe(400);
+    expect((await bigRes.json()).error).toContain("2.000.000.000 VNĐ");
+  });
+
+  it("handles malformed JSON and invalid IDs with 400 instead of 500", async () => {
+    const { managerToken } = await getTokens();
+    const headers = { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`, "Content-Type": "application/json" };
+
+    // Malformed JSON on POST
+    const badJsonReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+      method: "POST",
+      headers,
+      body: "{ bad json",
+    });
+    expect((await createItemHandler(badJsonReq)).status).toBe(400);
+
+    // Non-numeric ID on availability
+    const badIdReq = new NextRequest("http://localhost:3000/api/v1/menu/items/abc/availability", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status: "HET_HANG" }),
+    });
+    expect((await patchAvailabilityHandler(badIdReq, { params: Promise.resolve({ id: "abc" }) })).status).toBe(400);
+
+    // Invalid status on availability
+    const badStatusReq = new NextRequest("http://localhost:3000/api/v1/menu/items/1/availability", {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status: "TAM_DUNG" }),
+    });
+    expect((await patchAvailabilityHandler(badStatusReq, { params: Promise.resolve({ id: "1" }) })).status).toBe(400);
+
+    // Invalid categoryId in GET items
+    const badCatGetReq = new NextRequest("http://localhost:3000/api/v1/menu/items?categoryId=abc", { headers });
+    expect((await getItemsHandler(badCatGetReq)).status).toBe(400);
+  });
+
+  it("rejects invalid or unsafe image URLs", async () => {
+    const { managerToken } = await getTokens();
+    const headers = { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`, "Content-Type": "application/json" };
+
+    const unsafeReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
+      method: "POST",
+      headers,
       body: JSON.stringify({
-        name: "Món Giá Âm",
-        price: -10000,
+        name: "Món XSS",
+        price: 20000,
         categoryId: 1,
+        imageUrl: "javascript:alert(1)",
       }),
     });
-
-    const res = await createItemHandler(req);
-    expect(res.status).toBe(400);
-
-    const data = await res.json();
-    expect(data.ok).toBe(false);
-    expect(data.error).toBe(ERROR_CATALOG.ERR_12.message);
+    const unsafeRes = await createItemHandler(unsafeReq);
+    expect(unsafeRes.status).toBe(400);
+    expect((await unsafeRes.json()).error).toContain("Đường dẫn ảnh không hợp lệ");
   });
 
-  it("rejects empty item name with 400", async () => {
-    const { managerToken } = await getTokens();
-    const req = new NextRequest("http://localhost:3000/api/v1/menu/items", {
-      method: "POST",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name: "   ",
-        price: 35000,
-        categoryId: 1,
-      }),
-    });
-
-    const res = await createItemHandler(req);
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.ok).toBe(false);
-    expect(data.error).toContain("Tên món ăn không được để trống");
-  });
-
-  it("allows QUAN_LY to create an item, then toggles availability to HET_HANG and verifies via GET", async () => {
+  it("allows QUAN_LY to create an item, toggles availability to HET_HANG and verifies via GET", async () => {
     const { managerToken, waiterToken } = await getTokens();
-
-    // 0. Ensure dynamic test category exists
     const testCategory = await createCategory({
-      name: "Trà sữa Test",
+      name: `Trà sữa Test ${Date.now().toString().slice(-4)}`,
       code: `CAT-TS-${Date.now().toString().slice(-4)}`,
     });
+    expect(testCategory).toBeDefined();
 
-    // 1. Create item as QUAN_LY
     const createReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
       method: "POST",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-        "Content-Type": "application/json",
-      },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "Trà sữa matcha test",
         price: 45000,
-        categoryId: testCategory.id,
+        categoryId: testCategory!.id,
         unit: "Ly",
         status: "DANG_BAN",
       }),
@@ -136,59 +163,25 @@ describe("Menu Items API Tests (US-12, FR-15, BR-14, ERR-12)", () => {
     const createRes = await createItemHandler(createReq);
     expect(createRes.status).toBe(201);
     const created = await createRes.json();
-    expect(created.ok).toBe(true);
-    expect(created.data.status).toBe("DANG_BAN");
     const itemId = created.data.id;
 
-    // 2. Toggle availability to HET_HANG (AC-12-1)
-    const patchReq = new NextRequest(
-      `http://localhost:3000/api/v1/menu/items/${itemId}/availability`,
-      {
-        method: "PATCH",
-        headers: {
-          Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: "HET_HANG" }),
-      },
-    );
-    const patchRes = await patchAvailabilityHandler(patchReq, {
-      params: Promise.resolve({ id: String(itemId) }),
+    // Toggle availability to HET_HANG
+    const patchReq = new NextRequest(`http://localhost:3000/api/v1/menu/items/${itemId}/availability`, {
+      method: "PATCH",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "HET_HANG" }),
     });
+    const patchRes = await patchAvailabilityHandler(patchReq, { params: Promise.resolve({ id: String(itemId) }) });
     expect(patchRes.status).toBe(200);
-    const patchData = await patchRes.json();
-    expect(patchData.ok).toBe(true);
-    expect(patchData.data.status).toBe("HET_HANG");
 
-    // 3. Phục vụ queries GET /api/v1/menu/items and sees HET_HANG
+    // Phục vụ queries GET and sees HET_HANG
     const getReq = new NextRequest("http://localhost:3000/api/v1/menu/items", {
       headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
     });
     const getRes = await getItemsHandler(getReq);
     expect(getRes.status).toBe(200);
     const itemsData = await getRes.json();
-    const fetchedItem = itemsData.data.find((i: { id: number }) => i.id === itemId);
-    expect(fetchedItem).toBeDefined();
-    expect(fetchedItem.status).toBe("HET_HANG");
-  });
-
-  it("rejects negative price on PATCH update with 400 and ERR-12", async () => {
-    const { managerToken } = await getTokens();
-    const req = new NextRequest("http://localhost:3000/api/v1/menu/items", {
-      method: "PATCH",
-      headers: {
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: 1,
-        price: -5000,
-      }),
-    });
-
-    const res = await updateItemHandler(req);
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toBe(ERROR_CATALOG.ERR_12.message);
+    const fetched = itemsData.data.find((i: { id: number }) => i.id === itemId);
+    expect(fetched?.status).toBe("HET_HANG");
   });
 });

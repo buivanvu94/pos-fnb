@@ -1,10 +1,17 @@
 import { z } from "zod";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 
+export const MAX_PRICE = 2_000_000_000;
+export const MAX_PRICE_MESSAGE = "Đơn giá món ăn không được vượt quá 2.000.000.000 VNĐ";
+export const MAX_TOPPING_PRICE_MESSAGE = "Đơn giá topping không được vượt quá 2.000.000.000 VNĐ";
+
+export const IMAGE_URL_REGEX = /^\/api\/v1\/menu\/images\/\d+-[0-9a-f]{12}\.(png|jpg|webp)$/;
+
 /**
  * Validation schema for creating a menu item.
  * BR-14: Price must be >= 0 VND and name must not be empty.
  * ERR-12: If price is negative, exact verbatim error message must be returned.
+ * Cap: Maximum safe price is 2,000,000,000 VND.
  */
 export const createMenuItemSchema = z.object({
   name: z
@@ -17,6 +24,9 @@ export const createMenuItemSchema = z.object({
     .int({ message: "Đơn giá món ăn phải là số nguyên" })
     .refine((val) => val >= 0, {
       message: ERROR_CATALOG.ERR_12.message,
+    })
+    .refine((val) => val <= MAX_PRICE, {
+      message: MAX_PRICE_MESSAGE,
     }),
   categoryId: z
     .number({ required_error: "Danh mục món ăn không được để trống" })
@@ -37,7 +47,14 @@ export const createMenuItemSchema = z.object({
       errorMap: () => ({ message: "Trạng thái phải là DANG_BAN hoặc HET_HANG" }),
     })
     .default("DANG_BAN"),
-  imageUrl: z.string().trim().nullable().optional(),
+  imageUrl: z
+    .string()
+    .trim()
+    .refine((val) => val === "" || IMAGE_URL_REGEX.test(val), {
+      message: "Đường dẫn ảnh không hợp lệ (chỉ chấp nhận ảnh tải lên từ hệ thống)",
+    })
+    .nullable()
+    .optional(),
   targetPrinter: z
     .enum(["KITCHEN", "BAR"], {
       errorMap: () => ({ message: "Máy in đích phải là KITCHEN hoặc BAR" }),
@@ -64,12 +81,22 @@ export const updateMenuItemSchema = z.object({
     .refine((val) => val >= 0, {
       message: ERROR_CATALOG.ERR_12.message,
     })
+    .refine((val) => val <= MAX_PRICE, {
+      message: MAX_PRICE_MESSAGE,
+    })
     .optional(),
   categoryId: z.number().int().positive().optional(),
   code: z.string().trim().max(20).optional(),
   unit: z.string().trim().max(20).optional(),
   status: z.enum(["DANG_BAN", "HET_HANG"]).optional(),
-  imageUrl: z.string().trim().nullable().optional(),
+  imageUrl: z
+    .string()
+    .trim()
+    .refine((val) => val === "" || IMAGE_URL_REGEX.test(val), {
+      message: "Đường dẫn ảnh không hợp lệ (chỉ chấp nhận ảnh tải lên từ hệ thống)",
+    })
+    .nullable()
+    .optional(),
   targetPrinter: z.enum(["KITCHEN", "BAR"]).optional(),
 });
 
@@ -117,6 +144,7 @@ export const createToppingSchema = z.object({
     .number()
     .int({ message: "Đơn giá topping phải là số nguyên" })
     .min(0, { message: "Đơn giá topping không được nhỏ hơn 0 VNĐ" })
+    .max(MAX_PRICE, { message: MAX_TOPPING_PRICE_MESSAGE })
     .default(0),
   isAvailable: z.boolean().default(true),
 });

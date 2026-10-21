@@ -117,16 +117,22 @@ export function ItemModal({ open, editingItem, categories, onCancel, onSuccess }
                 if (val === undefined || val === null || val === "") {
                   return Promise.reject(new Error("Đơn giá món ăn không được để trống"));
                 }
-                if (Number(val) < 0) return Promise.reject(new Error(ERROR_CATALOG.ERR_12.message));
+                const num = Number(val);
+                if (num < 0) return Promise.reject(new Error(ERROR_CATALOG.ERR_12.message));
+                if (num > 2000000000) {
+                  return Promise.reject(new Error("Đơn giá món ăn không được vượt quá 2.000.000.000 VNĐ"));
+                }
                 return Promise.resolve();
               },
             },
           ]}
         >
-          <InputNumber
+          <InputNumber<number>
             style={{ width: "100%" }}
+            precision={0}
+            max={2000000000}
             formatter={(val) => `${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
-            parser={(val) => (val ? Number(val.replace(/\D/g, "")) : 0)}
+            parser={(val) => (val ? Number(val.replace(/[^\d-]/g, "")) : 0)}
             addonAfter="₫"
           />
         </Form.Item>

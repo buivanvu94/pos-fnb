@@ -7,30 +7,26 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
-/**
- * PATCH /api/v1/menu/items/:id/availability
- * Toggles product availability between DANG_BAN and HET_HANG (FR-15, BR-09).
- * Strictly requires QUAN_LY.
- */
 export async function PATCH(req: NextRequest, context: RouteContext) {
   const auth = await requireRole(req, "QUAN_LY");
-  if (!auth.authorized) {
-    return auth.response;
-  }
+  if (!auth.authorized) return auth.response;
 
-  const { id: rawId } = await Promise.resolve(context.params);
+  const { id: rawId } = await context.params;
   const id = parseInt(rawId, 10);
   if (isNaN(id) || id <= 0) {
-    return NextResponse.json(
-      { ok: false, error: "ID món ăn không hợp lệ" },
-      { status: 400 },
-    );
+    return NextResponse.json({ ok: false, error: "ID món ăn không hợp lệ" }, { status: 400 });
   }
 
   try {
-    const rawBody = await req.json();
-    const result = updateAvailabilitySchema.safeParse(rawBody);
+    const rawBody = await req.json().catch(() => null);
+    if (!rawBody || typeof rawBody !== "object") {
+      return NextResponse.json(
+        { ok: false, error: "Dữ liệu yêu cầu không hợp lệ (JSON không đúng định dạng)" },
+        { status: 400 },
+      );
+    }
 
+    const result = updateAvailabilitySchema.safeParse(rawBody);
     if (!result.success) {
       return NextResponse.json(
         {
@@ -51,10 +47,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const updated = await updateMenuItemAvailability(id, targetStatus);
     if (!updated) {
-      return NextResponse.json(
-        { ok: false, error: `Không tìm thấy món ăn với ID ${id}` },
-        { status: 404 },
-      );
+      return NextResponse.json({ ok: false, error: `Không tìm thấy món ăn với ID ${id}` }, { status: 404 });
     }
 
     return NextResponse.json({
@@ -64,9 +57,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     });
   } catch (error) {
     console.error("Failed to update menu item availability:", error);
-    return NextResponse.json(
-      { ok: false, error: "Không thể cập nhật trạng thái món ăn" },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: "Không thể cập nhật trạng thái món ăn" }, { status: 500 });
   }
 }
