@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POS Bán Hàng F&B (Quán Ăn, Cafe) — Wireframe</title>
+<style>
+:root{--ink:#1f1f1f;--muted:#6b6b6b;--line:#bdbdbd;--soft:#f1f1f1;--bg:#fafafa;--panel:#fff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#e8e8e8;--muted:#a0a0a0;--line:#555;--soft:#2a2a2a;--bg:#161616;--panel:#1e1e1e}}
+:root[data-theme="dark"]{--ink:#e8e8e8;--muted:#a0a0a0;--line:#555;--soft:#2a2a2a;--bg:#161616;--panel:#1e1e1e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,"Segoe UI",Roboto,sans-serif}
+.layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:100vh}
+nav{border-right:1px solid var(--line);padding:18px 14px;background:var(--panel);position:sticky;top:0;height:100vh;overflow:auto}
+nav b{display:block;font-size:12px;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin:14px 0 4px}
+nav a{display:block;padding:6px 10px;border-radius:6px;color:var(--ink);text-decoration:none;font-size:13px;margin:2px 0}
+nav a.on{background:var(--soft);font-weight:700}
+main{padding:20px 28px 60px;min-width:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;font-size:13px}
+.bar button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:99px;padding:4px 12px;cursor:pointer}
+.bar button.on{background:var(--ink);color:var(--panel)}
+.screen{display:none}.screen.on{display:block}
+.frame{border:2px solid var(--ink);border-radius:10px;background:var(--panel);max-width:980px;margin:0 auto}
+.frame.mobile{max-width:390px}
+.frame .top{border-bottom:1px solid var(--line);padding:8px 14px;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;background:var(--soft)}
+.frame .body{padding:20px}
+.box{border:1px dashed var(--line);border-radius:8px;padding:12px;margin:10px 0}
+.field{display:block;margin:10px 0}.field span{display:block;font-weight:600;font-size:13px;margin-bottom:4px}
+.input{border:1px solid var(--ink);border-radius:6px;height:36px;padding:6px 10px;color:var(--ink);display:flex;align-items:center;background:var(--panel)}
+.btn{display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--ink);border-radius:6px;padding:7px 16px;font-weight:700;cursor:pointer;background:var(--panel);color:var(--ink);user-select:none;gap:6px}
+.btn.primary{background:var(--ink);color:var(--panel)}
+.msg{border:2px solid var(--ink);border-radius:6px;padding:10px 14px;margin:10px 0;background:var(--soft)}
+.mk{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--ink);color:var(--panel);font:700 11px system-ui;font-style:normal;margin:0 4px;vertical-align:middle}
+.desc{max-width:980px;margin:24px auto 0;font-size:13px}
+.desc table{width:100%;border-collapse:collapse}.desc th,.desc td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+.desc th{background:var(--soft)}
+.grid-tables{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px;margin:14px 0}
+.tbl-card{border:2px solid var(--line);border-radius:8px;padding:12px;text-align:center;cursor:pointer}
+.tbl-card.empty{border-color:#2e7d32;background:#e8f5e9}
+.tbl-card.occupied{border-color:#c62828;background:#ffebee}
+.tbl-card.waiting{border-color:#f57f17;background:#fffde7}
+.grid-menu{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin:12px 0}
+.menu-item{border:1px solid var(--line);border-radius:6px;padding:10px;cursor:pointer;background:var(--panel);text-align:center}
+.flex{display:flex;gap:12px}.flex-1{flex:1}.flex-col{flex-direction:column}
+.tab-bar{display:flex;gap:8px;border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:12px}
+.tab{padding:6px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--line)}
+.tab.active{background:var(--ink);color:var(--panel);font-weight:700}
+@media(max-width:800px){.layout{grid-template-columns:1fr}nav{position:static;height:auto}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav aria-label="Màn hình">
+  <div style="font-weight:800;font-size:15px">POS Bán Hàng F&B</div>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Wireframe nguyên mẫu tương tác</div>
+  <div id="toc"></div>
+</nav>
+<main>
+  <div class="bar">
+    <span>Khung nhìn:</span>
+    <button type="button" data-frame="desktop" class="on">Máy tính / POS cảm ứng</button>
+    <button type="button" data-frame="mobile">Tablet / Điện thoại</button>
+    <span style="margin-left:14px">Biến thể:</span>
+    <span id="states"></span>
+  </div>
+
+  <!-- SCR-01 -->
+  <section class="screen" id="scr-01" data-scr="SCR-01" data-title="Màn hình Mở ca làm việc" data-flow="Luồng Mở ca (UC-01)">
+    <div class="frame">
+      <div class="top"><span>SCR-01 · Màn hình Mở ca làm việc</span><span>POS F&B</span></div>
+      <div class="body">
+        <h2>Bắt đầu ca làm việc <i class="mk">1</i></h2>
+        <p style="color:var(--muted)">Thu ngân: Nguyễn Văn A · Ca sáng · 2026-10-20 07:00</p>
+        
+        <label class="field">
+          <span>Tiền mặt lẻ trong két đầu ca (VNĐ) <i class="mk">2</i></span>
+          <div class="input">1,000,000</div>
+        </label>
+
+        <div style="margin:16px 0">
+          <span class="btn primary" data-go="scr-02">Xác nhận mở ca <i class="mk">3</i></span>
+        </div>
+
+        <div data-state="Lỗi ERR-01" hidden>
+          <div class="msg" style="border-color:#d32f2f;background:#ffebee">
+            <strong>LỖI:</strong> Ca làm việc chưa được mở. Vui lòng mở ca và nhập số dư tiền mặt đầu ca để bắt đầu. <i class="mk">4</i>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Tiêu đề ca & Ngày giờ</td><td>Nhãn văn bản</td><td>Hiển thị tên thu ngân đăng nhập và thời gian mở ca</td><td>FR-06</td></tr>
+        <tr><td>2</td><td>Ô nhập Tiền mặt đầu ca</td><td>Ô nhập số</td><td>Nhập số tiền mặt có sẵn trong két để thối tiền lẻ</td><td>FR-06</td></tr>
+        <tr><td>3</td><td>Nút Xác nhận mở ca</td><td>Nút bấm chính</td><td>Kích hoạt ca làm việc và chuyển sang sơ đồ bàn (SCR-02)</td><td>FR-06</td></tr>
+        <tr><td>4</td><td>Khu vực thông báo lỗi</td><td>Nhãn cảnh báo</td><td>Hiển thị ERR-01 nếu cố tình bán hàng khi chưa mở ca</td><td>ERR-01</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-02 -->
+  <section class="screen" id="scr-02" data-scr="SCR-02" data-title="Sơ đồ bàn & Gọi món tại bàn" data-flow="Luồng Bán tại bàn (UC-02)">
+    <div class="frame">
+      <div class="top"><span>SCR-02 · Sơ đồ bàn & Gọi món tại bàn</span><span>POS F&B</span></div>
+      <div class="body">
+        <div class="tab-bar">
+          <div class="tab active">Tầng 1 (12 bàn) <i class="mk">1</i></div>
+          <div class="tab">Tầng 2 (8 bàn)</div>
+          <div class="tab">Sân vườn (6 bàn)</div>
+        </div>
+
+        <div class="flex">
+          <div class="flex-1">
+            <h4>Sơ đồ bàn phòng <i class="mk">2</i></h4>
+            <div class="grid-tables">
+              <div class="tbl-card empty"><strong>Bàn 01</strong><br><small>Trống</small></div>
+              <div class="tbl-card occupied"><strong>Bàn 02</strong><br><small>3 món · 150k</small></div>
+              <div class="tbl-card waiting"><strong>Bàn 03</strong><br><small>Chờ tính tiền</small></div>
+              <div class="tbl-card empty"><strong>Bàn 04</strong><br><small>Trống</small></div>
+            </div>
+
+            <div class="tab-bar" style="margin-top:16px">
+              <div class="tab active">Tất cả <i class="mk">3</i></div>
+              <div class="tab">Cà phê</div>
+              <div class="tab">Trà sữa</div>
+              <div class="tab">Món ăn vặt</div>
+            </div>
+
+            <h4>Danh mục món <i class="mk">4</i></h4>
+            <div class="grid-menu">
+              <div class="menu-item"><strong>Cà phê đen</strong><br>25,000 đ</div>
+              <div class="menu-item"><strong>Cà phê sữa</strong><br>29,000 đ</div>
+              <div class="menu-item"><strong>Trà đào cam sả</strong><br>35,000 đ</div>
+              <div class="menu-item" style="opacity:0.5"><strong>Sinh tố bơ</strong><br><small style="color:red">[Hết hàng]</small></div>
+            </div>
+          </div>
+
+          <div style="width:340px;border-left:1px solid var(--line);padding-left:14px">
+            <h4>Bàn 01 — Chi tiết order <i class="mk">5</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+                <span>1x Cà phê sữa (Ít ngọt)</span>
+                <span>29,000 đ</span>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span>1x Trà đào cam sả</span>
+                <span>35,000 đ</span>
+              </div>
+              <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
+              <div style="display:flex;justify-content:space-between;font-weight:700">
+                <span>Tổng tiền:</span>
+                <span>64,000 đ</span>
+              </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span class="btn primary" data-go="scr-02">Gửi Bếp (In KOT) <i class="mk">6</i></span>
+              <span class="btn" data-go="scr-03">Chuyển / Gộp bàn <i class="mk">7</i></span>
+              <span class="btn" data-go="scr-06">In tạm tính & Thanh toán <i class="mk">8</i></span>
+            </div>
+
+            <div data-state="Lỗi món hết hàng ERR-07" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Món Sinh tố bơ hiện đã hết. Vui lòng chọn món khác!
+              </div>
+            </div>
+
+            <div data-state="Lỗi máy in LAN ERR-06" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Không thể kết nối tới máy in bếp. Vui lòng kiểm tra nguồn điện và dây mạng của máy in!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Tab Khu vực phòng bàn</td><td>Danh sách tab chọn</td><td>Lọc danh sách bàn theo từng khu vực quán</td><td>FR-01</td></tr>
+        <tr><td>2</td><td>Lưới ô Bàn ăn</td><td>Danh sách thẻ nút</td><td>Bàn Trống (xanh lá), Đang phục vụ (đỏ), Chờ tính tiền (vàng)</td><td>FR-01</td></tr>
+        <tr><td>3</td><td>Danh mục nhóm món</td><td>Danh sách cuộn ngang</td><td>Lọc danh sách món ăn theo phân loại thực đơn</td><td>FR-02</td></tr>
+        <tr><td>4</td><td>Danh sách món ăn</td><td>Lưới thẻ món</td><td>Bấm vào món để thêm vào giỏ hàng bàn</td><td>FR-02</td></tr>
+        <tr><td>5</td><td>Danh sách chi tiết order</td><td>Bảng giỏ hàng</td><td>Hiển thị các món đã chọn của bàn hiện tại</td><td>FR-02</td></tr>
+        <tr><td>6</td><td>Nút Gửi Bếp</td><td>Nút bấm chính</td><td>Lưu đơn, chuyển bàn sang màu đỏ, in phiếu chế biến qua LAN</td><td>FR-03</td></tr>
+        <tr><td>7</td><td>Nút Chuyển/Gộp bàn</td><td>Nút bấm phụ</td><td>Mở hộp thoại SCR-03</td><td>FR-04</td></tr>
+        <tr><td>8</td><td>Nút In tạm tính</td><td>Nút bấm phụ</td><td>Mở màn hình SCR-06, chuyển bàn sang màu vàng</td><td>FR-13</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-03 -->
+  <section class="screen" id="scr-03" data-scr="SCR-03" data-title="Hộp thoại Chuyển bàn và Gộp bàn" data-flow="Luồng Chuyển/Gộp bàn (UC-03)">
+    <div class="frame">
+      <div class="top"><span>SCR-03 · Hộp thoại Chuyển bàn và Gộp bàn</span><span>POS F&B</span></div>
+      <div class="body">
+        <h3>Điều chuyển bàn ăn</h3>
+        <label class="field">
+          <span>Loại thao tác <i class="mk">1</i></span>
+          <div class="tab-bar">
+            <div class="tab active">Chuyển sang bàn khác</div>
+            <div class="tab">Gộp vào bàn khác</div>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>Bàn nguồn hiện tại <i class="mk">2</i></span>
+          <div class="input">Bàn 01 (Đang có 2 món · 64,000 đ)</div>
+        </label>
+
+        <label class="field">
+          <span>Chọn bàn đích <i class="mk">3</i></span>
+          <div class="input">Bàn 04 (Tầng 1 - Đang trống)</div>
+        </label>
+
+        <div style="margin-top:20px;display:flex;gap:10px">
+          <span class="btn primary" data-go="scr-02">Xác nhận thực hiện <i class="mk">4</i></span>
+          <span class="btn" data-go="scr-02">Hủy bỏ</span>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Chọn loại thao tác</td><td>Nút chuyển đổi</td><td>Xác định chế độ chuyển toàn bộ hay sáp nhập món</td><td>FR-04</td></tr>
+        <tr><td>2</td><td>Bàn nguồn hiện tại</td><td>Nhãn văn bản</td><td>Cố định bàn đang mở thao tác</td><td>FR-04</td></tr>
+        <tr><td>3</td><td>Danh sách bàn đích</td><td>Hộp thả chọn</td><td>Chọn bàn nhận món (Trống nếu chuyển, Đang dùng nếu gộp)</td><td>FR-04</td></tr>
+        <tr><td>4</td><td>Nút Xác nhận chuyển/gộp</td><td>Nút bấm chính</td><td>Hoàn tất lệnh chuyển hoặc gộp, quay lại SCR-02</td><td>FR-04</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-04 -->
+  <section class="screen" id="scr-04" data-scr="SCR-04" data-title="Màn hình Bán tại quầy / Mang về" data-flow="Luồng Bán tại quầy (UC-04)">
+    <div class="frame">
+      <div class="top"><span>SCR-04 · Bán tại quầy / Mang về</span><span>POS F&B</span></div>
+      <div class="body">
+        <div class="flex">
+          <div class="flex-1">
+            <label class="field">
+              <span>Tìm kiếm món nhanh (Tên hoặc Mã món) <i class="mk">1</i></span>
+              <div class="input">Gõ tìm kiếm món ăn, đồ uống...</div>
+            </label>
+
+            <h4>Thực đơn chạm nhanh <i class="mk">2</i></h4>
+            <div class="grid-menu">
+              <div class="menu-item"><strong>Cà phê sữa đá</strong><br>29,000 đ</div>
+              <div class="menu-item"><strong>Trà đào cam sả</strong><br>35,000 đ</div>
+              <div class="menu-item"><strong>Trà vải sen vàng</strong><br>39,000 đ</div>
+              <div class="menu-item"><strong>Bánh mì que pate</strong><br>15,000 đ</div>
+            </div>
+          </div>
+
+          <div style="width:340px;border-left:1px solid var(--line);padding-left:14px">
+            <h4>Đơn mang về — STT: #042 <i class="mk">3</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between">
+                <span>1x Cà phê sữa đá</span>
+                <span>29,000 đ</span>
+              </div>
+              <hr style="border:none;border-top:1px solid var(--line);margin:10px 0">
+              <div style="display:flex;justify-content:space-between;font-weight:700">
+                <span>Khách cần trả:</span>
+                <span>29,000 đ</span>
+              </div>
+            </div>
+
+            <span class="btn primary" data-go="scr-06">Thanh toán & In số thứ tự <i class="mk">4</i></span>
+
+            <div data-state="Lỗi giỏ hàng rỗng ERR-08" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Đơn hàng chưa có món ăn. Vui lòng chọn món trước khi thanh toán!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Ô tìm kiếm món nhanh</td><td>Ô nhập văn bản</td><td>Tìm nhanh món ăn/đồ uống khi khách đông</td><td>FR-05</td></tr>
+        <tr><td>2</td><td>Danh sách thực đơn chạm</td><td>Lưới thẻ món lớn</td><td>Chạm nhanh để thêm vào đơn mang về</td><td>FR-05</td></tr>
+        <tr><td>3</td><td>Giỏ hàng tại quầy</td><td>Bảng danh sách món</td><td>Hiển thị các món khách mua mang đi</td><td>FR-05</td></tr>
+        <tr><td>4</td><td>Nút Thanh toán nhanh</td><td>Nút bấm chính</td><td>Mở màn hình thanh toán SCR-06</td><td>FR-05</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-05 -->
+  <section class="screen" id="scr-05" data-scr="SCR-05" data-title="Hộp thoại Xác thực mã PIN Quản lý" data-flow="Luồng Phê duyệt PIN (UC-05)">
+    <div class="frame">
+      <div class="top"><span>SCR-05 · Hộp thoại Xác thực mã PIN Quản lý</span><span>POS F&B</span></div>
+      <div class="body" style="max-width:440px;margin:0 auto;text-align:center">
+        <h3>Xác thực quyền Quản lý <i class="mk">1</i></h3>
+        <p style="color:var(--muted)">Thao tác nhạy cảm: Hủy món "Cà phê sữa" trên Bàn 01</p>
+
+        <label class="field" style="text-align:left">
+          <span>Lý do thực hiện (tối thiểu 5 ký tự) <i class="mk">2</i></span>
+          <div class="input">Khách đổi sang trà đào</div>
+        </label>
+
+        <label class="field" style="text-align:left">
+          <span>Nhập mã PIN Quản lý (4-6 số) <i class="mk">3</i></span>
+          <div class="input" style="letter-spacing:6px;font-size:20px;justify-content:center">••••</div>
+        </label>
+
+        <div style="margin-top:20px;display:flex;gap:10px;justify-content:center">
+          <span class="btn primary" data-go="scr-02">Xác nhận phê duyệt <i class="mk">4</i></span>
+          <span class="btn" data-go="scr-02">Đóng</span>
+        </div>
+
+        <div data-state="Lỗi sai PIN ERR-02" hidden>
+          <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:14px">
+            Mã PIN phê duyệt không chính xác. Vui lòng kiểm tra lại!
+          </div>
+        </div>
+
+        <div data-state="Lỗi khóa PIN ERR-03" hidden>
+          <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:14px">
+            Bạn đã nhập sai mã PIN quá 5 lần. Chức năng xác thực bị khóa tạm thời trong 5 phút!
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Tiêu đề hành động nhạy cảm</td><td>Nhãn văn bản</td><td>Báo rõ thao tác nào đang yêu cầu quyền Quản lý</td><td>FR-10</td></tr>
+        <tr><td>2</td><td>Ô nhập lý do thao tác</td><td>Ô nhập văn bản</td><td>Ghi nhận nguyên nhân (tối thiểu 5 ký tự)</td><td>FR-10</td></tr>
+        <tr><td>3</td><td>Bàn phím số nhập mã PIN</td><td>Bàn phím số cảm ứng</td><td>Quản lý nhập mã PIN bí mật (4 đến 6 số)</td><td>FR-10</td></tr>
+        <tr><td>4</td><td>Nút Xác nhận phê duyệt</td><td>Nút bấm chính</td><td>Kiểm tra PIN, thực hiện lệnh hoặc báo lỗi</td><td>FR-10</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-06 -->
+  <section class="screen" id="scr-06" data-scr="SCR-06" data-title="Màn hình Thanh toán & Hiển thị VietQR" data-flow="Luồng Thanh toán (UC-06)">
+    <div class="frame">
+      <div class="top"><span>SCR-06 · Thanh toán & VietQR</span><span>POS F&B</span></div>
+      <div class="body">
+        <div class="flex">
+          <div class="flex-1">
+            <h4>Bảng kê thanh toán <i class="mk">1</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Tổng tiền món:</span><span>175,000 đ</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Chiết khấu / Giảm giá:</span><span>0 đ</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:16px;font-weight:700"><span>KHÁCH CẦN TRẢ:</span><span>175,000 đ</span></div>
+            </div>
+
+            <h4>Phương thức thanh toán <i class="mk">2</i></h4>
+            <div class="tab-bar">
+              <div class="tab active">Tiền mặt</div>
+              <div class="tab">Chuyển khoản VietQR</div>
+            </div>
+
+            <div class="box">
+              <h4>Thanh toán Tiền mặt <i class="mk">3</i></h4>
+              <label class="field">
+                <span>Tiền khách đưa (VNĐ):</span>
+                <div class="input">200,000</div>
+              </label>
+              <div style="font-weight:700;color:#2e7d32">Tiền thối lại: 25,000 đ</div>
+            </div>
+          </div>
+
+          <div style="width:360px;border-left:1px solid var(--line);padding-left:14px;text-align:center">
+            <h4>Quét mã VietQR động <i class="mk">4</i></h4>
+            <div class="box" style="padding:20px">
+              <div style="width:160px;height:160px;background:#eee;border:1px dashed #999;margin:0 auto;display:flex;align-items:center;justify-content:center">
+                [ Mã VietQR Động ]
+              </div>
+              <p style="font-size:12px;margin:8px 0">Số tiền: <strong>175,000 đ</strong> · Mã: HD0042</p>
+              <small style="color:var(--muted)">Hết hạn sau: 02:45</small>
+            </div>
+
+            <span class="btn primary" data-go="scr-02">Hoàn tất & In hóa đơn <i class="mk">5</i></span>
+
+            <div data-state="Lỗi VietQR timeout ERR-09" hidden>
+              <div class="msg" style="border-color:#f57c00;background:#fff3e0;font-size:12px;text-align:left;margin-top:10px">
+                Hết thời gian chờ thanh toán VietQR. Vui lòng tạo mã QR mới hoặc thanh toán tiền mặt!
+              </div>
+            </div>
+
+            <div data-state="Lỗi máy in bill ERR-10" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;text-align:left;margin-top:10px">
+                Máy in hóa đơn hết giấy hoặc bị kẹt. Vui lòng kiểm tra giấy và in lại!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Bảng kê chi tiết thanh toán</td><td>Bảng tóm tắt</td><td>Hiển thị tổng tiền hàng, giảm giá và số tiền cần trả</td><td>FR-11</td></tr>
+        <tr><td>2</td><td>Nút chọn Phương thức</td><td>Nút chọn tab</td><td>Chuyển đổi giữa Tiền mặt và VietQR</td><td>FR-11</td></tr>
+        <tr><td>3</td><td>Khung Tiền mặt</td><td>Khối nhập số & gợi ý</td><td>Nhập tiền khách đưa, tự động tính tiền thối</td><td>FR-11</td></tr>
+        <tr><td>4</td><td>Khung mã VietQR động</td><td>Vùng hiển thị ảnh QR</td><td>Hiển thị mã QR chuẩn NAPAS247 kèm đếm ngược 3 phút</td><td>FR-12</td></tr>
+        <tr><td>5</td><td>Nút Hoàn tất thanh toán</td><td>Nút bấm chính</td><td>Ghi nhận thanh toán, giải phóng bàn và in hóa đơn</td><td>FR-13</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-07 -->
+  <section class="screen" id="scr-07" data-scr="SCR-07" data-title="Hộp thoại Thu / Chi tiền mặt trong ca" data-flow="Luồng Thu Chi vặt (UC-07)">
+    <div class="frame">
+      <div class="top"><span>SCR-07 · Hộp thoại Thu / Chi tiền mặt trong ca</span><span>POS F&B</span></div>
+      <div class="body" style="max-width:480px;margin:0 auto">
+        <h3>Ghi nhận Thu / Chi tiền mặt khẩn cấp</h3>
+        <label class="field">
+          <span>Loại giao dịch <i class="mk">1</i></span>
+          <div class="tab-bar">
+            <div class="tab">Thu tiền mặt (Nạp thêm)</div>
+            <div class="tab active">Chi tiền mặt (Xuất quỹ)</div>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>Số tiền thực hiện (VNĐ) <i class="mk">2</i></span>
+          <div class="input">50,000</div>
+        </label>
+
+        <label class="field">
+          <span>Lý do chi tiết <i class="mk">3</i></span>
+          <div class="input">Mua đá uống cấp tốc cho quầy Bar</div>
+        </label>
+
+        <div style="margin-top:20px;display:flex;gap:10px">
+          <span class="btn primary" data-go="scr-02">Xác nhận tạo phiếu <i class="mk">4</i></span>
+          <span class="btn" data-go="scr-02">Đóng</span>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Lựa chọn loại phiếu</td><td>Nút chuyển đổi</td><td>Phân định khoản nạp thêm hay chi ra</td><td>FR-07</td></tr>
+        <tr><td>2</td><td>Ô nhập số tiền</td><td>Ô nhập số</td><td>Số tiền mặt thực tế giao dịch (> 0 VNĐ)</td><td>FR-07</td></tr>
+        <tr><td>3</td><td>Ô nhập lý do chi tiết</td><td>Ô nhập văn bản</td><td>Ghi rõ mục đích sử dụng quỹ tiền mặt</td><td>FR-07</td></tr>
+        <tr><td>4</td><td>Nút Xác nhận tạo phiếu</td><td>Nút bấm chính</td><td>Lưu phiếu và cập nhật Tiền mặt lý thuyết của ca</td><td>FR-07</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-08 -->
+  <section class="screen" id="scr-08" data-scr="SCR-08" data-title="Màn hình Kết ca & Kiểm đếm két tiền" data-flow="Luồng Đóng ca (UC-08)">
+    <div class="frame">
+      <div class="top"><span>SCR-08 · Kết ca & Kiểm đếm két tiền</span><span>POS F&B</span></div>
+      <div class="body">
+        <h3>Tổng kết & Bàn giao ca làm việc</h3>
+        <div class="flex">
+          <div class="flex-1">
+            <h4>Báo cáo sổ sách ca làm <i class="mk">1</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Tiền mặt đầu ca:</span><span>1,000,000 đ</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Doanh thu Tiền mặt:</span><span>2,550,000 đ</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Doanh thu VietQR:</span><span>1,800,000 đ</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Chi vặt trong ca:</span><span>-50,000 đ</span></div>
+              <hr style="border:none;border-top:1px solid var(--line);margin:8px 0">
+              <div style="display:flex;justify-content:space-between;font-weight:700"><span>Tiền mặt lý thuyết trong két:</span><span>3,500,000 đ</span></div>
+            </div>
+
+            <label class="field">
+              <span>Tiền mặt thực đếm trong két (VNĐ) <i class="mk">2</i></span>
+              <div class="input">3,450,000</div>
+            </label>
+
+            <div class="box" style="background:#fff3e0;border-color:#ffb74d">
+              <strong>Độ lệch tiền mặt: <i class="mk">3</i></strong> <span style="color:#d32f2f;font-weight:700">-50,000 đ (Thiếu tiền)</span>
+            </div>
+          </div>
+
+          <div style="width:360px;border-left:1px solid var(--line);padding-left:14px">
+            <label class="field">
+              <span>Lý do giải trình độ lệch <i class="mk">4</i></span>
+              <div class="input">Thối nhầm tiền cho khách bàn 03</div>
+            </label>
+
+            <label class="field">
+              <span>Mã PIN Quản lý ký duyệt đóng ca <i class="mk">5</i></span>
+              <div class="input" style="letter-spacing:6px;font-size:18px;justify-content:center">••••</div>
+            </label>
+
+            <div style="margin-top:20px">
+              <span class="btn primary" data-go="scr-01">Ký duyệt & Đóng ca (In Z-Report) <i class="mk">6</i></span>
+            </div>
+
+            <div data-state="Lỗi còn bàn chưa thanh toán ERR-04" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Không thể đóng ca! Vẫn còn 1 bàn chưa hoàn tất thanh toán. Vui lòng thanh toán hoặc bàn giao bàn.
+              </div>
+            </div>
+
+            <div data-state="Lỗi thiếu giải trình lệch tiền ERR-05" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Tiền mặt thực tế bị lệch -50,000 VNĐ. Vui lòng nhập lý do giải trình để tiếp tục!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Thống kê doanh thu ca</td><td>Bảng tóm tắt</td><td>Tổng hợp toàn bộ số liệu tài chính trong ca</td><td>FR-08</td></tr>
+        <tr><td>2</td><td>Ô nhập Tiền thực đếm</td><td>Ô nhập số</td><td>Thu ngân nhập tổng số tiền mặt đếm được trong két</td><td>FR-08</td></tr>
+        <tr><td>3</td><td>Nhãn hiển thị Độ lệch</td><td>Nhãn màu cảnh báo</td><td>Khớp tiền (0đ), Thừa tiền (+), Thiếu tiền (-)</td><td>FR-08</td></tr>
+        <tr><td>4</td><td>Ô nhập Ghi chú giải trình</td><td>Ô nhập văn bản</td><td>Giải trình nguyên nhân thừa/thiếu tiền</td><td>FR-08</td></tr>
+        <tr><td>5</td><td>Ô nhập PIN Quản lý ký duyệt</td><td>Bàn phím số mã PIN</td><td>Quản lý đồng kiểm đếm và ký xác nhận đóng ca</td><td>FR-09</td></tr>
+        <tr><td>6</td><td>Nút Ký duyệt & Đóng ca</td><td>Nút bấm chính</td><td>Khóa ca, in biên bản Z-Report và đăng xuất</td><td>FR-09</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-09 -->
+  <section class="screen" id="scr-09" data-scr="SCR-09" data-title="Màn hình Báo cáo doanh thu & Thống kê" data-flow="Luồng Báo cáo doanh thu (UC-09)">
+    <div class="frame">
+      <div class="top"><span>SCR-09 · Báo cáo doanh thu & Thống kê</span><span>POS F&B</span></div>
+      <div class="body">
+        <div class="tab-bar">
+          <div class="tab active">Hôm nay <i class="mk">1</i></div>
+          <div class="tab">Hôm qua</div>
+          <div class="tab">7 ngày qua</div>
+          <div class="tab">Tháng này</div>
+        </div>
+
+        <h4>Chỉ số tổng quan hôm nay <i class="mk">2</i></h4>
+        <div class="flex" style="gap:10px;margin-bottom:14px">
+          <div class="box flex-1" style="text-align:center">
+            <small style="color:var(--muted)">TỔNG DOANH THU</small>
+            <div style="font-size:20px;font-weight:800">4,350,000 đ</div>
+          </div>
+          <div class="box flex-1" style="text-align:center">
+            <small style="color:var(--muted)">TỔNG ĐƠN HÀNG</small>
+            <div style="font-size:20px;font-weight:800">42 đơn</div>
+          </div>
+          <div class="box flex-1" style="text-align:center">
+            <small style="color:var(--muted)">GIÁ TRỊ ĐƠN TB</small>
+            <div style="font-size:20px;font-weight:800">103,500 đ</div>
+          </div>
+        </div>
+
+        <div class="flex">
+          <div class="flex-1">
+            <h4>Cơ cấu thanh toán <i class="mk">3</i></h4>
+            <div class="box" style="height:120px;display:flex;align-items:center;justify-content:center;background:#f5f5f5">
+              [ Biểu đồ tỷ trọng: Tiền mặt 58% vs VietQR 42% ]
+            </div>
+
+            <h4>Báo cáo theo ca làm việc <i class="mk">4</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                <span>CA-20261020-01 (Thu ngân: Văn A)</span>
+                <strong>2,150,000 đ</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between">
+                <span>CA-20261020-02 (Thu ngân: Thị B)</span>
+                <strong>2,200,000 đ</strong>
+              </div>
+            </div>
+          </div>
+
+          <div style="width:340px;border-left:1px solid var(--line);padding-left:14px">
+            <h4>Top món bán chạy <i class="mk">5</i></h4>
+            <div class="box">
+              <ol style="margin:0;padding-left:20px">
+                <li style="margin-bottom:6px">Cà phê sữa đá (28 ly)</li>
+                <li style="margin-bottom:6px">Trà đào cam sả (19 ly)</li>
+                <li style="margin-bottom:6px">Cà phê muối (15 ly)</li>
+                <li style="margin-bottom:6px">Trà vải sen vàng (12 ly)</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <div data-state="Lỗi chọn ngày lọc ERR-11" hidden>
+          <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+            Ngày bắt đầu không được lớn hơn ngày kết thúc!
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Bộ lọc khoảng thời gian</td><td>Hộp chọn ngày</td><td>Lọc báo cáo (Hôm nay, hôm qua, khoảng ngày)</td><td>FR-14</td></tr>
+        <tr><td>2</td><td>Thẻ chỉ số tổng quan</td><td>Thẻ số liệu lớn</td><td>Tổng doanh thu thuần, số lượng đơn, giá trị đơn TB</td><td>FR-14</td></tr>
+        <tr><td>3</td><td>Biểu đồ tỷ trọng thanh toán</td><td>Biểu đồ tròn</td><td>Theo dõi tỷ lệ thanh toán Tiền mặt vs VietQR</td><td>FR-14</td></tr>
+        <tr><td>4</td><td>Bảng doanh thu theo ca</td><td>Bảng dữ liệu</td><td>Chi tiết doanh thu từng ca làm của nhân viên</td><td>FR-14</td></tr>
+        <tr><td>5</td><td>Bảng top món bán chạy</td><td>Bảng xếp hạng</td><td>Xếp hạng các món ăn thức uống bán chạy nhất</td><td>FR-14</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- SCR-10 -->
+  <section class="screen" id="scr-10" data-scr="SCR-10" data-title="Màn hình Quản lý thực đơn & Trạng thái món" data-flow="Luồng Quản lý món (UC-10)">
+    <div class="frame">
+      <div class="top"><span>SCR-10 · Quản lý thực đơn & Trạng thái món</span><span>POS F&B</span></div>
+      <div class="body">
+        <div class="flex">
+          <div style="width:200px;border-right:1px solid var(--line);padding-right:12px">
+            <h4>Nhóm món <i class="mk">1</i></h4>
+            <div class="box">
+              <div><strong>Cà phê (8)</strong></div>
+              <div>Trà trái cây (6)</div>
+              <div>Trà sữa (5)</div>
+              <div>Đồ ăn vặt (4)</div>
+            </div>
+          </div>
+
+          <div class="flex-1" style="padding-left:14px">
+            <h4>Danh sách món ăn <i class="mk">2</i></h4>
+            <div class="box">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span>Cà phê đen — 25,000 đ</span>
+                <span class="btn" style="padding:2px 8px;font-size:12px">Đang bán <i class="mk">3</i></span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span>Cà phê sữa — 29,000 đ</span>
+                <span class="btn" style="padding:2px 8px;font-size:12px">Đang bán</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span>Sinh tố bơ — 40,000 đ</span>
+                <span class="btn" style="padding:2px 8px;font-size:12px;background:#ffebee;color:#c62828">Hết hàng</span>
+              </div>
+            </div>
+
+            <h4>Thêm / Chỉnh sửa món <i class="mk">4</i></h4>
+            <div class="box">
+              <label class="field"><span>Tên món:</span><div class="input">Cà phê muối béo</div></label>
+              <label class="field"><span>Đơn giá (VNĐ):</span><div class="input">32,000</div></label>
+              <span class="btn primary" style="margin-top:8px">Lưu thông tin món</span>
+            </div>
+
+            <div data-state="Lỗi đơn giá âm ERR-12" hidden>
+              <div class="msg" style="border-color:#d32f2f;background:#ffebee;font-size:12px;margin-top:10px">
+                Đơn giá món ăn không được nhỏ hơn 0 VNĐ!
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="desc">
+      <table>
+        <tr><th>#</th><th>Thành phần</th><th>Kiểu control</th><th>Mô tả và hành vi</th><th>Liên quan</th></tr>
+        <tr><td>1</td><td>Cây danh mục nhóm món</td><td>Danh sách chọn</td><td>Phân nhóm món ăn thức uống</td><td>FR-15</td></tr>
+        <tr><td>2</td><td>Bảng danh sách món</td><td>Bảng dữ liệu</td><td>Hiển thị toàn bộ thực đơn quán</td><td>FR-15</td></tr>
+        <tr><td>3</td><td>Nút gạt bật/tắt Hết hàng</td><td>Nút gạt trạng thái</td><td>Bật tắt nhanh trạng thái hết món tức thời trên POS</td><td>FR-15</td></tr>
+        <tr><td>4</td><td>Form thêm/sửa món ăn</td><td>Hộp thoại nhập liệu</td><td>Nhập tên, đơn giá và nhóm danh mục món</td><td>FR-15</td></tr>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div>
+<script>
+(function(){
+  var screens=[].slice.call(document.querySelectorAll('.screen')),toc=document.getElementById('toc'),states=document.getElementById('states'),flow='';
+  screens.forEach(function(s){
+    if(s.dataset.flow!==flow){flow=s.dataset.flow;var b=document.createElement('b');b.textContent=flow;toc.appendChild(b);}
+    var a=document.createElement('a');a.href='#'+s.id;a.textContent=s.dataset.scr+' '+s.dataset.title;toc.appendChild(a);
+  });
+  function show(id){
+    var cur=document.getElementById(id)||screens[0];
+    screens.forEach(function(s){s.classList.toggle('on',s===cur)});
+    [].forEach.call(toc.querySelectorAll('a'),function(a){a.classList.toggle('on',a.hash==='#'+cur.id)});
+    states.innerHTML='';
+    var variants=[].slice.call(cur.querySelectorAll('[data-state]'));
+    var names=['Bình thường'].concat(variants.map(function(v){return v.dataset.state}).filter(function(n,i,a){return a.indexOf(n)===i}));
+    names.forEach(function(n,i){
+      var b=document.createElement('button');b.type='button';b.textContent=n;if(!i)b.className='on';
+      b.onclick=function(){variants.forEach(function(v){v.hidden=v.dataset.state!==n});[].forEach.call(states.children,function(c){c.classList.toggle('on',c===b)})};
+      states.appendChild(b);
+    });
+    variants.forEach(function(v){v.hidden=true});
+  }
+  document.addEventListener('click',function(e){
+    var g=e.target.closest('[data-go]');if(g){location.hash=g.dataset.go;}
+    var f=e.target.closest('[data-frame]');if(f){[].forEach.call(document.querySelectorAll('.frame'),function(x){x.classList.toggle('mobile',f.dataset.frame==='mobile')});
+      [].forEach.call(document.querySelectorAll('[data-frame]'),function(x){x.classList.toggle('on',x===f)});}
+  });
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1))});
+  show(location.hash.slice(1));
+})();
+</script>
+</body>
+</html>

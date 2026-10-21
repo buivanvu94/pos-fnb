@@ -1,0 +1,107 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Quy Trình Phân Tích Nghiệp Vụ ba-kit & ba-portal",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "output": "docs/ba/pos-fnb/diagrams/ba-kit-portal-workflow.html",
+    "views": [
+      {
+        "id": "happy-path",
+        "label": "Vòng đời chuẩn từ đầu đến cuối",
+        "focus": ["node_req", "node_init", "node_draft", "node_check", "node_push", "node_handoff", "node_code"],
+        "note": "Theo dõi toàn bộ chuỗi phân tích nghiệp vụ từ lúc tiếp nhận yêu cầu thô đến bàn giao cho Dev."
+      },
+      {
+        "id": "gate-stop",
+        "label": "Cổng Stage-Gate & Tương tác khách",
+        "focus": ["node_push", "node_gate", "node_mcp", "node_client", "node_consume"],
+        "note": "Xem cơ chế khóa chặn không cho nhảy cóc, dừng chờ khách hàng chốt câu hỏi trên Cổng web."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "lane_ba", "label": "Chuyên viên BA / AI Agent" },
+    { "id": "lane_cli", "label": "Bộ công cụ ba-kit CLI" },
+    { "id": "lane_gate", "label": "Cổng Stage-Gate (Chặn nhảy cóc)", "variant": "exception" },
+    { "id": "lane_portal", "label": "Cổng Web ba-portal & MCP Server" },
+    { "id": "lane_client", "label": "Khách hàng & Chủ doanh nghiệp" }
+  ],
+  "phases": [
+    { "id": "phase_intake", "label": "1. Khởi tạo & Khơi gợi", "fromCol": 0, "toCol": 1 },
+    { "id": "phase_design", "label": "2. Đặc tả & Cổng kiểm soát", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "phase_handoff", "label": "3. Nghiệm thu & Bàn giao", "fromCol": 5, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "group_check", "label": "Kiểm soát truy vết", "lane": "lane_gate", "fromCol": 2, "toCol": 3, "variant": "security" },
+    { "id": "group_portal", "label": "Tương tác Cổng web & MCP", "lane": "lane_portal", "fromCol": 3, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": [
+    "node_req",
+    "node_init",
+    "node_draft",
+    "node_check",
+    "node_push",
+    "node_gate",
+    "node_mcp",
+    "node_client",
+    "node_consume",
+    "node_handoff",
+    "node_code"
+  ],
+  "nodes": [
+    { "id": "node_req", "lane": "lane_ba", "col": 0, "type": "frontend", "label": "Tiếp nhận yêu cầu", "sublabel": "ghi nhận nhu cầu thô", "width": 140 },
+    { "id": "node_init", "lane": "lane_cli", "col": 1, "type": "backend", "label": "Khởi tạo sáng kiến", "sublabel": "ba.py init slug", "width": 140 },
+    { "id": "node_draft", "lane": "lane_cli", "col": 2, "type": "backend", "label": "Soạn thảo tài liệu", "sublabel": "intake, brainstorm, srs...", "width": 140 },
+    { "id": "node_check", "lane": "lane_gate", "col": 2, "type": "security", "label": "Kiểm tra truy vết", "sublabel": "ba.py check (0 lỗi AST)", "tag": "bắt buộc", "width": 140 },
+    { "id": "node_push", "lane": "lane_portal", "col": 3, "type": "cloud", "label": "Đẩy lên Cổng web", "sublabel": "ba.py portal push", "width": 140 },
+    { "id": "node_gate", "lane": "lane_gate", "col": 3, "type": "security", "label": "DỪNG BẮT BUỘC", "sublabel": "khóa bước tiếp theo", "tag": "chặn nhảy cóc", "width": 140 },
+    { "id": "node_mcp", "lane": "lane_portal", "col": 4, "type": "messagebus", "label": "Bắn câu hỏi mở", "sublabel": "MCP post_questions", "tag": "tự động", "width": 140 },
+    { "id": "node_client", "lane": "lane_client", "col": 4, "type": "external", "label": "Khách hàng trả lời", "sublabel": "chọn phương án trên web", "tag": "quyền quyết định", "width": 140 },
+    { "id": "node_consume", "lane": "lane_portal", "col": 5, "type": "messagebus", "label": "Thu nạp quyết định", "sublabel": "MCP get_answers (DEC)", "width": 140 },
+    { "id": "node_handoff", "lane": "lane_cli", "col": 5, "type": "backend", "label": "Bàn giao kỹ thuật", "sublabel": "ba.py handoff (DoR)", "tag": "sẵn sàng", "width": 140 },
+    { "id": "node_code", "lane": "lane_ba", "col": 5, "type": "frontend", "label": "Lập trình & Test", "sublabel": "Dev / AI Agent thực thi", "width": 140 }
+  ],
+  "edges": [
+    { "id": "e_req_init", "from": "node_req", "to": "node_init", "variant": "default" },
+    { "id": "e_init_draft", "from": "node_init", "to": "node_draft", "variant": "default" },
+    { "id": "e_draft_check", "from": "node_draft", "to": "node_check", "variant": "security" },
+    { "id": "e_check_push", "from": "node_check", "to": "node_push", "label": "đạt 0 lỗi", "variant": "emphasis" },
+    { "id": "e_push_gate", "from": "node_push", "to": "node_gate", "label": "kích hoạt chốt", "variant": "security" },
+    { "id": "e_gate_mcp", "from": "node_gate", "to": "node_mcp", "label": "gửi câu hỏi", "variant": "default" },
+    { "id": "e_mcp_client", "from": "node_mcp", "to": "node_client", "variant": "emphasis" },
+    { "id": "e_client_consume", "from": "node_client", "to": "node_consume", "label": "nộp câu trả lời", "variant": "emphasis" },
+    { "id": "e_consume_handoff", "from": "node_consume", "to": "node_handoff", "label": "chốt DEC", "variant": "emphasis" },
+    { "id": "e_handoff_code", "from": "node_handoff", "to": "node_code", "label": "brief chuẩn DoR", "variant": "emphasis" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Nguyên Tắc Bất Biến (BABOK v3 & ISO 29148)",
+      "items": [
+        "Mọi dòng đặc tả đều truy vết nguồn gốc (Traceability AST 100%)",
+        "Mỗi bước hoàn thành tự động đẩy lên portal sinh bản xem trước cho khách",
+        "Tuyệt đối không tự ý bịa đặt yêu cầu hoặc giả định ngoài lời khách hàng"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Cơ Chế Stage-Gate Dừng Bắt Buộc",
+      "items": [
+        "Khóa chặn tuyệt đối: Không nhảy cóc khi còn câu hỏi mở (OQ)",
+        "Khi tạo đợt câu hỏi qua MCP, quy trình dừng lại chờ khách hàng xác nhận",
+        "Chỉ mở khóa bước tiếp theo khi khách đã nộp câu trả lời chính thức (DEC)"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Cầu Nối MCP & Bàn Giao Kỹ Thuật",
+      "items": [
+        "Giao tiếp hai chiều Client-AI qua HTTP Streamable MCP Server",
+        "Tự động sinh brief bàn giao cho Dev đạt chuẩn Definition of Ready (DoR)",
+        "Hỗ trợ trọn gói: HTML tương tác, OpenAPI, Postman và Playwright E2E"
+      ]
+    }
+  ]
+}
