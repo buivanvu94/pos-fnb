@@ -1,6 +1,9 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, orderItems, menuItems } from "@/db/schema";
+import { orders, orderItems, menuItems, tables } from "@/db/schema";
+import { ERROR_CATALOG } from "@/lib/error-catalog";
+import { enqueuePrintJob, dispatchPrintJob } from "@/server/printing/print-service";
+import type { KotPayload } from "@/server/printing/print-payload-types";
 import { TxAbortError } from "./tx-abort-error";
 
 export type SendKitchenResult =
@@ -15,19 +18,82 @@ export type SendKitchenResult =
           bar: any[];
         };
       };
+      printWarning?: {
+        message: string;
+        failedJobs: Array<{ id: number; error: string }>;
+      };
     }
   | { ok: false; error: string; status: number };
 
 /**
+ * Deduplicated helper to enqueue a single station's ticket within transaction (Point 10).
+ */
+async function enqueueStationTicket(
+  tx: any,
+  orderId: number,
+  orderCode: string,
+  tableName: string,
+  senderName: string,
+  now: Date,
+  station: "KITCHEN" | "BAR",
+  items: Array<{ name: string | null; quantity: number; notes: string | null; unitPrice: number }>,
+): Promise<number | null> {
+  if (items.length === 0) return null;
+
+  const jobType = station === "BAR" ? "KOT_BAR" : "KOT_KITCHEN";
+  const defaultName = station === "BAR" ? "Đồ uống" : "Món ăn";
+
+  const payload: KotPayload = {
+    kind: "KOT",
+    orderId,
+    orderCode,
+    tableName,
+    senderName,
+    sentAt: now.toISOString(),
+    targetStation: station,
+    items: items.map((i) => ({
+      name: i.name || defaultName,
+      quantity: i.quantity,
+      notes: i.notes,
+      unitPrice: i.unitPrice,
+    })),
+  };
+
+  const job = await enqueuePrintJob(
+    {
+      orderId,
+      jobType,
+      targetPrinter: station,
+      payload,
+    },
+    tx,
+  );
+  return job.id;
+}
+
+/**
  * Marks unprinted order items as sent to kitchen and groups them by station (FR-03).
- * Verifies that the order is DANG_PHUC_VU and enforces optimistic locking via expectedVersion.
+ * Enqueues print jobs for KITCHEN and BAR in the same transaction, then dispatches
+ * them after commit. Catches printer communication failures and attaches printWarning
+ * with ERR-06 verbatim without failing the order (AC-03-2, DEC-07).
  */
 export async function sendKitchenOrder(
   orderId: number,
   expectedVersion?: number,
+  senderName?: string,
 ): Promise<SendKitchenResult> {
+  let createdJobIds: number[] = [];
+  let txResult: {
+    orderCode: string;
+    sentAt: string;
+    items: {
+      kitchen: any[];
+      bar: any[];
+    };
+  };
+
   try {
-    return await db.transaction(async (tx) => {
+    const res = await db.transaction(async (tx) => {
       const [order] = await tx
         .select()
         .from(orders)
@@ -85,23 +151,99 @@ export async function sendKitchenOrder(
       const kitchenItems = unprintedItems.filter((i) => (i.targetPrinter ?? "KITCHEN") === "KITCHEN");
       const barItems = unprintedItems.filter((i) => (i.targetPrinter ?? "KITCHEN") === "BAR");
 
+      let tableName = "Mang về";
+      if (order.tableId) {
+        const [tableRow] = await tx
+          .select({ name: tables.name })
+          .from(tables)
+          .where(eq(tables.id, order.tableId))
+          .limit(1);
+        if (tableRow?.name) {
+          tableName = tableRow.name;
+        }
+      }
+
+      const effectiveSender = senderName || "Nhân viên phục vụ";
+      const jobIds: number[] = [];
+
+      // Enqueue Kitchen and Bar using unified helper (Point 10)
+      const kId = await enqueueStationTicket(tx, orderId, order.orderCode, tableName, effectiveSender, now, "KITCHEN", kitchenItems);
+      if (kId !== null) jobIds.push(kId);
+
+      const bId = await enqueueStationTicket(tx, orderId, order.orderCode, tableName, effectiveSender, now, "BAR", barItems);
+      if (bId !== null) jobIds.push(bId);
+
       return {
-        ok: true,
-        data: {
-          orderId,
-          orderCode: order.orderCode,
-          sentAt: now.toISOString(),
-          items: {
-            kitchen: kitchenItems,
-            bar: barItems,
-          },
+        jobIds,
+        orderCode: order.orderCode,
+        sentAt: now.toISOString(),
+        items: {
+          kitchen: kitchenItems,
+          bar: barItems,
         },
       };
     });
+
+    createdJobIds = res.jobIds;
+    txResult = res;
   } catch (err: any) {
     if (err instanceof TxAbortError) {
       return { ok: false, error: err.message, status: err.status };
     }
     throw err;
   }
+
+  // Point 1: Dispatch simultaneously via Promise.allSettled with complete failure isolation (NFR-02)
+  const failedJobs: Array<{ id: number; error: string }> = [];
+
+  const dispatchPromises = createdJobIds.map(async (jId) => {
+    try {
+      const dispatchRes = await dispatchPrintJob(jId);
+      if (!dispatchRes.ok && dispatchRes.status !== "ALREADY_HANDLED") {
+        return {
+          id: jId,
+          error: dispatchRes.error || ERROR_CATALOG.ERR_06.message,
+        };
+      }
+      return null;
+    } catch (dispatchErr: any) {
+      console.error(`Unexpected error dispatching job ${jId}:`, dispatchErr);
+      return {
+        id: jId,
+        error: dispatchErr?.message || ERROR_CATALOG.ERR_06.message,
+      };
+    }
+  });
+
+  const settledResults = await Promise.allSettled(dispatchPromises);
+  for (const outcome of settledResults) {
+    if (outcome.status === "fulfilled" && outcome.value !== null) {
+      failedJobs.push(outcome.value);
+    } else if (outcome.status === "rejected") {
+      failedJobs.push({
+        id: -1,
+        error: ERROR_CATALOG.ERR_06.message,
+      });
+    }
+  }
+
+  // Point 10: printWarning returned only at top-level result
+  const printWarning =
+    failedJobs.length > 0
+      ? {
+          message: ERROR_CATALOG.ERR_06.message,
+          failedJobs,
+        }
+      : undefined;
+
+  return {
+    ok: true,
+    data: {
+      orderId,
+      orderCode: txResult.orderCode,
+      sentAt: txResult.sentAt,
+      items: txResult.items,
+    },
+    ...(printWarning ? { printWarning } : {}),
+  };
 }

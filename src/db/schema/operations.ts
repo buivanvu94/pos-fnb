@@ -15,7 +15,7 @@ export const printJobs = pgTable(
     jobType: varchar("job_type", { length: 30 }).notNull(),
     targetPrinter: varchar("target_printer", { length: 50 }).notNull(),
     payload: text("payload").notNull(),
-    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENT | FAILED
+    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENDING | SENT | FAILED
     retryCount: integer("retry_count").notNull().default(0),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -28,7 +28,7 @@ export const printJobs = pgTable(
       "print_jobs_job_type_check",
       sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT', 'CASH_RECEIPT')`,
     ),
-    check("print_jobs_status_check", sql`${table.status} IN ('PENDING', 'SENT', 'FAILED')`),
+    check("print_jobs_status_check", sql`${table.status} IN ('PENDING', 'SENDING', 'SENT', 'FAILED')`),
   ],
 );
 
@@ -63,7 +63,7 @@ export const outbox = pgTable(
     eventType: varchar("event_type", { length: 50 }).notNull(),
     aggregateId: varchar("aggregate_id", { length: 50 }).notNull(),
     payload: text("payload").notNull(),
-    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENT | FAILED
+    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENDING | SENT | FAILED
     retryCount: integer("retry_count").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     processedAt: timestamp("processed_at", { withTimezone: true }),

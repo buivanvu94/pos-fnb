@@ -49,7 +49,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const result = await sendKitchenOrder(orderId, parsed.data.expectedVersion);
+    const result = await sendKitchenOrder(orderId, parsed.data.expectedVersion, auth.user.fullName);
 
     if (!result.ok) {
       return NextResponse.json(

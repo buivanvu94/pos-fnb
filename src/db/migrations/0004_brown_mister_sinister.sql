@@ -1,0 +1,2 @@
+ALTER TABLE "print_jobs" DROP CONSTRAINT "print_jobs_status_check";--> statement-breakpoint
+ALTER TABLE "print_jobs" ADD CONSTRAINT "print_jobs_status_check" CHECK ("print_jobs"."status" IN ('PENDING', 'SENDING', 'SENT', 'FAILED'));
