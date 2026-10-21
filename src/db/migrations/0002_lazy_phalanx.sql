@@ -1,0 +1,2 @@
+ALTER TABLE "print_jobs" DROP CONSTRAINT "print_jobs_job_type_check";--> statement-breakpoint
+ALTER TABLE "print_jobs" ADD CONSTRAINT "print_jobs_job_type_check" CHECK ("print_jobs"."job_type" IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT', 'CASH_RECEIPT'));

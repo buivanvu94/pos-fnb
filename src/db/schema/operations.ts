@@ -5,7 +5,7 @@ import { orders } from "./orders-payments";
 
 /**
  * Print jobs for queuing print operations to LAN thermal printers.
- * Types: KOT_KITCHEN | KOT_BAR | RECEIPT_TEMP | RECEIPT_FINAL | Z_REPORT
+ * Types: KOT_KITCHEN | KOT_BAR | RECEIPT_TEMP | RECEIPT_FINAL | Z_REPORT | CASH_RECEIPT
  */
 export const printJobs = pgTable(
   "print_jobs",
@@ -26,7 +26,7 @@ export const printJobs = pgTable(
     index("print_jobs_order_id_idx").on(table.orderId),
     check(
       "print_jobs_job_type_check",
-      sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT')`,
+      sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT', 'CASH_RECEIPT')`,
     ),
     check("print_jobs_status_check", sql`${table.status} IN ('PENDING', 'SENT', 'FAILED')`),
   ],
