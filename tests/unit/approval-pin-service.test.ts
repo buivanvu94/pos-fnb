@@ -18,7 +18,7 @@ describe("Approval PIN Service - Unit Tests (FR-10, BR-04, ERR-02, ERR-03)", () 
 
   let managerId: number;
   let waiterId: number;
-  const CORRECT_PIN = "1234";
+  const CORRECT_PIN = "6183";
   const WRONG_PIN = "9999";
 
   beforeAll(async () => {
@@ -163,3 +163,5 @@ describe("Approval PIN Service - Unit Tests (FR-10, BR-04, ERR-02, ERR-03)", () 
     expect(user.pinLockedUntil).not.toBeNull();
   });
 });
+
+

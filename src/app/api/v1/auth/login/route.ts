@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { users } from "@/db/schema";
-import { signAuthToken, AUTH_COOKIE_NAME, isCookieSecure } from "@/server/auth/jwt";
+import { signAuthToken, AUTH_COOKIE_NAME, AUTH_COOKIE_MAX_AGE, isCookieSecure } from "@/server/auth/jwt";
+import { authenticateUser } from "@/server/auth/login-lockout-service";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 import type { Role } from "@/lib/permissions";
 
 /**
  * POST /api/v1/auth/login
- * Handles user authentication with username and password, returns JWT in httpOnly cookie.
+ * Handles user authentication with username and password.
+ * Protected against brute-force attacks via atomic lockout after 5 consecutive failures.
+ * Sets 12-hour session JWT cookie.
  */
 export async function POST(req: NextRequest) {
   let rawBody: unknown;
@@ -40,27 +40,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const foundUsers = await db
-      .select()
-      .from(users)
-      .where(eq(users.username, String(username).trim()))
-      .limit(1);
+    const clientIp = getClientIp(req);
+    const userAgent = getUserAgent(req);
 
-    const user = foundUsers[0];
-    if (!user) {
+    const authResult = await authenticateUser(
+      String(username),
+      String(password),
+      clientIp,
+      userAgent,
+    );
+
+    if (!authResult.ok) {
       return NextResponse.json(
-        { ok: false, error: "Tên đăng nhập hoặc mật khẩu không chính xác" },
-        { status: 401 },
+        { ok: false, error: authResult.error },
+        { status: authResult.status },
       );
     }
 
-    const isValidPassword = await bcrypt.compare(String(password), user.passwordHash);
-    if (!isValidPassword) {
-      return NextResponse.json(
-        { ok: false, error: "Tên đăng nhập hoặc mật khẩu không chính xác" },
-        { status: 401 },
-      );
-    }
+    const user = authResult.user;
 
     const token = await signAuthToken({
       userId: user.id,
@@ -86,7 +83,7 @@ export async function POST(req: NextRequest) {
       secure: isCookieSecure(),
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: AUTH_COOKIE_MAX_AGE,
     });
 
     return response;

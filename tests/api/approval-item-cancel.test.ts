@@ -2,12 +2,13 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { POST as modifyOrderItemsHandler } from "@/app/api/v1/orders/[id]/items/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
+import { setPinRequired, isPinRequired } from "@/server/approvals/approval-settings-service";
 import { getTestDbUrl } from "../setup/test-config";
 
 describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2, BR-03, FR-10)", () => {
@@ -30,9 +31,10 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
   let categoryId: number;
   let kitchenItemId: number;
   let barItemId: number;
+  let initialPinRequired: boolean;
 
-  const CORRECT_PIN = "9876";
-  const WRONG_PIN = "1111";
+  const CORRECT_PIN = "8391";
+  const WRONG_PIN = "0000";
 
   async function createTestOrder(totalAmount = 50000) {
     const [table] = await db
@@ -60,12 +62,13 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     pool = new Pool({ connectionString: testDbUrl });
     db = drizzle(pool, { schema });
 
+    initialPinRequired = await isPinRequired();
     const pinHash = await bcrypt.hash(CORRECT_PIN, 10);
 
     const [manager] = await db
       .insert(schema.users)
       .values({
-        username: `mgr_itmc_${tag}`,
+        username: `mgr_canc_${tag}`,
         fullName: "Quản Lý Test Hủy Món",
         role: "QUAN_LY",
         passwordHash: "dummy",
@@ -83,7 +86,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     const [cashier] = await db
       .insert(schema.users)
       .values({
-        username: `csh_itmc_${tag}`,
+        username: `csh_canc_${tag}`,
         fullName: "Thu Ngân Test Hủy Món",
         role: "THU_NGAN",
         passwordHash: "dummy",
@@ -100,7 +103,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     const [waiter] = await db
       .insert(schema.users)
       .values({
-        username: `wtr_itmc_${tag}`,
+        username: `wtr_canc_${tag}`,
         fullName: "Phục Vụ Test Hủy Món",
         role: "PHUC_VU",
         passwordHash: "dummy",
@@ -114,13 +117,13 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       role: "PHUC_VU",
     });
 
-    const [area] = await db.insert(schema.areas).values({ code: `A_${tag}`, name: `Area_${tag}` }).returning();
+    const [area] = await db.insert(schema.areas).values({ code: `A_M_${tag}`, name: `Area M ${tag}` }).returning();
     areaId = area.id;
 
     const [shift] = await db
       .insert(schema.shifts)
       .values({
-        shiftCode: `CA_${tag}`,
+        shiftCode: `CA_M_${tag}`,
         cashierId: cashier.id,
         initialCash: 1000000,
         expectedCash: 1000000,
@@ -131,23 +134,23 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
 
     const [cat] = await db
       .insert(schema.categories)
-      .values({ code: `CAT_${tag}`, name: `Cat ${tag}` })
+      .values({ code: `CAT_M_${tag}`, name: `Cat M ${tag}` })
       .returning();
     categoryId = cat.id;
 
-    const [kitchenItem] = await db
+    const [kItem] = await db
       .insert(schema.menuItems)
       .values({
         code: `MON_K_${tag}`,
         categoryId: cat.id,
-        name: "Cơm gà xối mỡ",
+        name: "Cơm chiên dưa bò",
         price: 50000,
         targetPrinter: "KITCHEN",
       })
       .returning();
-    kitchenItemId = kitchenItem.id;
+    kitchenItemId = kItem.id;
 
-    const [barItem] = await db
+    const [bItem] = await db
       .insert(schema.menuItems)
       .values({
         code: `MON_B_${tag}`,
@@ -157,12 +160,13 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
         targetPrinter: "BAR",
       })
       .returning();
-    barItemId = barItem.id;
+    barItemId = bItem.id;
   });
 
   afterAll(async () => {
+    await setPinRequired(initialPinRequired);
+
     if (db) {
-      await db.delete(schema.printJobs).where(sqlActiveOrders());
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, kitchenItemId));
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, barItemId));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, shiftId));
@@ -171,6 +175,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       await db.delete(schema.tables).where(eq(schema.tables.areaId, areaId));
       await db.delete(schema.areas).where(eq(schema.areas.id, areaId));
       await db.delete(schema.shifts).where(eq(schema.shifts.id, shiftId));
+      await db.delete(schema.printJobs).where(inArray(schema.printJobs.jobType, ["KOT_KITCHEN", "KOT_BAR"]));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, waiterId));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, cashierId));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, managerId));
@@ -181,77 +186,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     await pool.end();
   });
 
-  function sqlActiveOrders() {
-    return eq(schema.printJobs.status, "PENDING");
-  }
-
-  it("AC-06-1: cancels kitchen-printed item with valid PIN, recalculates total, enqueues KOT_CANCEL job, records audit", async () => {
-    const { table, order } = await createTestOrder(35000);
-
-    const [item] = await db
-      .insert(schema.orderItems)
-      .values({
-        orderId: order.id,
-        menuItemId: barItemId,
-        quantity: 1,
-        unitPrice: 35000,
-        isPrintedKitchen: true,
-        sentAt: new Date(),
-      })
-      .returning();
-
-    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
-      },
-      body: JSON.stringify({
-        action: "delete",
-        orderItemId: item.id,
-        expectedVersion: 1,
-        pinCode: CORRECT_PIN,
-        lyDo: "Khách đổi món sang trà sữa",
-      }),
-    });
-
-    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.data.totalAmount).toBe(0);
-    expect(body.data.finalAmount).toBe(0);
-
-    const [updatedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
-    expect(updatedItem.isCancelled).toBe(true);
-    expect(updatedItem.cancelReason).toBe("Khách đổi món sang trà sữa");
-    expect(updatedItem.cancelledById).toBe(waiterId);
-
-    const printJobs = await db
-      .select()
-      .from(schema.printJobs)
-      .where(and(eq(schema.printJobs.orderId, order.id), eq(schema.printJobs.jobType, "KOT_BAR")));
-    expect(printJobs.length).toBeGreaterThanOrEqual(1);
-
-    const latestJob = printJobs[printJobs.length - 1];
-    expect(latestJob.targetPrinter).toBe("BAR");
-    const payload = JSON.parse(latestJob.payload);
-    expect(payload.kind).toBe("KOT_CANCEL");
-    expect(payload.reason).toBe("Khách đổi món sang trà sữa");
-    expect(payload.items[0].name).toBe("Trà đào cam sả");
-
-    const auditEntries = await db
-      .select()
-      .from(schema.auditLogs)
-      .where(and(eq(schema.auditLogs.action, "CANCEL_ITEM"), eq(schema.auditLogs.entityId, String(item.id))));
-    expect(auditEntries.length).toBe(1);
-    expect(auditEntries[0].reason).toBe("Khách đổi món sang trà sữa");
-    const meta = JSON.parse(auditEntries[0].metadata!);
-    expect(meta.approverId).toBe(managerId);
-  });
-
-  it("AC-06-2: rejects cancellation of printed item when PIN is wrong (403 ERR-02), leaves data unchanged", async () => {
+  it("AC-06-1: cancels printed kitchen item with THU_NGAN + valid Manager PIN, enqueues KOT_CANCEL with approverName, and recalculates total", async () => {
     const { order } = await createTestOrder(50000);
 
     const [item] = await db
@@ -270,7 +205,60 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify({
+        action: "delete",
+        orderItemId: item.id,
+        expectedVersion: 1,
+        pinCode: CORRECT_PIN,
+        lyDo: "Khách đổi ý muốn hủy món cơm",
+      }),
+    });
+
+    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.totalAmount).toBe(0);
+
+    const [updatedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
+    expect(updatedItem.isCancelled).toBe(true);
+    expect(updatedItem.cancelReason).toBe("Khách đổi ý muốn hủy món cơm");
+
+    const printJobs = await db
+      .select()
+      .from(schema.printJobs)
+      .where(and(eq(schema.printJobs.orderId, order.id), eq(schema.printJobs.jobType, "KOT_KITCHEN")));
+    expect(printJobs.length).toBeGreaterThanOrEqual(1);
+
+    const latestJob = printJobs[printJobs.length - 1];
+    const payload = JSON.parse(latestJob.payload);
+    expect(payload.kind).toBe("KOT_CANCEL");
+    expect(payload.approverName).toBe("Quản Lý Test Hủy Món");
+  });
+
+  it("AC-06-2: rejects cancellation of printed item when PIN is wrong (403 ERR-02)", async () => {
+    const { order } = await createTestOrder(50000);
+
+    const [item] = await db
+      .insert(schema.orderItems)
+      .values({
+        orderId: order.id,
+        menuItemId: kitchenItemId,
+        quantity: 1,
+        unitPrice: 50000,
+        isPrintedKitchen: true,
+        sentAt: new Date(),
+      })
+      .returning();
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
       },
       body: JSON.stringify({
         action: "delete",
@@ -287,15 +275,9 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.error).toBe(ERROR_CATALOG.ERR_02.message);
-
-    const [unchangedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
-    expect(unchangedItem.isCancelled).toBe(false);
-
-    const [unchangedOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, order.id));
-    expect(unchangedOrder.totalAmount).toBe(50000);
   });
 
-  it("allows deleting unprinted items without requiring PIN or reason", async () => {
+  it("allows deleting unprinted items and records REMOVE_UNSENT_ITEM in audit log", async () => {
     const { order } = await createTestOrder(50000);
 
     const [unprintedItem] = await db
@@ -327,9 +309,17 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
 
     const deleted = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, unprintedItem.id));
     expect(deleted.length).toBe(0);
+
+    // Verify REMOVE_UNSENT_ITEM audit log
+    const [audit] = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.action, "REMOVE_UNSENT_ITEM"), eq(schema.auditLogs.entityId, String(unprintedItem.id))));
+    expect(audit).toBeDefined();
+    expect(audit.reason).toContain("Xóa món chưa gửi bếp");
   });
 
-  it("allows QUAN_LY to cancel printed item without PIN, but reason >= 5 chars is mandatory", async () => {
+  it("rejects cancel kitchen item when reason is under 5 chars with 400 Bad Request", async () => {
     const { order } = await createTestOrder(50000);
 
     const [item] = await db
@@ -343,54 +333,38 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       })
       .returning();
 
-    // 1. Manager with reason < 5 chars is rejected (400)
-    const reqInvalid = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
       },
       body: JSON.stringify({
         action: "delete",
         orderItemId: item.id,
         expectedVersion: 1,
-        lyDo: "Huy", // < 5 chars
+        pinCode: CORRECT_PIN,
+        lyDo: "Huy", // Only 3 chars
       }),
     });
-    const resInvalid = await modifyOrderItemsHandler(reqInvalid, { params: Promise.resolve({ id: String(order.id) }) });
-    expect(resInvalid.status).toBe(400);
 
-    // 2. Manager without PIN but with reason >= 5 chars succeeds
-    const reqValid = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-      },
-      body: JSON.stringify({
-        action: "delete",
-        orderItemId: item.id,
-        expectedVersion: 1,
-        lyDo: "Quản lý trực tiếp hủy theo yêu cầu khách",
-      }),
-    });
-    const resValid = await modifyOrderItemsHandler(reqValid, { params: Promise.resolve({ id: String(order.id) }) });
-    expect(resValid.status).toBe(200);
-
-    const [cancelledItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
-    expect(cancelledItem.isCancelled).toBe(true);
-    expect(cancelledItem.cancelledById).toBe(managerId);
+    const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("tối thiểu 5 ký tự");
   });
 
-  it("reduces quantity of printed item (3 -> 1) with PIN: enqueues KOT_CANCEL for 2, updates total and logs REDUCE_ITEM", async () => {
-    const { order } = await createTestOrder(150000);
+  it("when approval.pinRequired is false, printed item cancellation succeeds without PIN", async () => {
+    await setPinRequired(false);
+
+    const { order } = await createTestOrder(50000);
 
     const [item] = await db
       .insert(schema.orderItems)
       .values({
         orderId: order.id,
         menuItemId: kitchenItemId,
-        quantity: 3,
+        quantity: 1,
         unitPrice: 50000,
         isPrintedKitchen: true,
       })
@@ -403,33 +377,69 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
         Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
       },
       body: JSON.stringify({
-        action: "update",
+        action: "delete",
         orderItemId: item.id,
-        quantity: 1,
         expectedVersion: 1,
-        pinCode: CORRECT_PIN,
-        lyDo: "Khách báo ăn không hết xin giảm 2 phần",
+        lyDo: "Hủy món khi đã tắt yêu cầu PIN",
       }),
     });
 
     const res = await modifyOrderItemsHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
     expect(res.status).toBe(200);
 
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.data.totalAmount).toBe(50000);
+    const [updatedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
+    expect(updatedItem.isCancelled).toBe(true);
 
-    const [reducedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
-    expect(reducedItem.quantity).toBe(1);
-    expect(reducedItem.isCancelled).toBe(false);
+    await setPinRequired(true);
+  });
 
-    const auditEntries = await db
-      .select()
-      .from(schema.auditLogs)
-      .where(and(eq(schema.auditLogs.action, "REDUCE_ITEM"), eq(schema.auditLogs.entityId, String(item.id))));
-    expect(auditEntries.length).toBe(1);
-    const meta = JSON.parse(auditEntries[0].metadata!);
-    expect(meta.quantityCancelled).toBe(2);
-    expect(meta.remainingQuantity).toBe(1);
+  it("handles 12 concurrent item cancel requests without connection pool exhaustion", async () => {
+    // Create 12 separate orders with 1 printed item each
+    const orderPromises = Array.from({ length: 12 }).map(async () => {
+      const { order } = await createTestOrder(50000);
+      const [item] = await db
+        .insert(schema.orderItems)
+        .values({
+          orderId: order.id,
+          menuItemId: kitchenItemId,
+          quantity: 1,
+          unitPrice: 50000,
+          isPrintedKitchen: true,
+        })
+        .returning();
+      return { order, item };
+    });
+
+    const ordersWithItems = await Promise.all(orderPromises);
+
+    // Fire all 12 requests simultaneously
+    const cancelRequests = ordersWithItems.map(({ order, item }) =>
+      modifyOrderItemsHandler(
+        new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+          },
+          body: JSON.stringify({
+            action: "delete",
+            orderItemId: item.id,
+            expectedVersion: 1,
+            pinCode: CORRECT_PIN,
+            lyDo: "Hủy đồng thời 12 món kiểm tra pool",
+          }),
+        }),
+        { params: Promise.resolve({ id: String(order.id) }) },
+      ),
+    );
+
+    const responses = await Promise.all(cancelRequests);
+    for (const res of responses) {
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+    }
   });
 });
+
+

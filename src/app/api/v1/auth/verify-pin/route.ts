@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/server/auth/require-role";
 import { verifyManagerPin } from "@/server/approvals/pin-service";
-import { getClientIp } from "@/server/approvals/ip-helper";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 const verifyPinSchema = z.object({
   pinCode: z
@@ -45,10 +45,12 @@ export async function POST(req: NextRequest) {
   }
 
   const clientIp = getClientIp(req);
+  const userAgent = getUserAgent(req);
   const result = await verifyManagerPin(
     auth.user.userId,
     parsed.data.pinCode,
     clientIp,
+    userAgent,
   );
 
   if (!result.valid) {

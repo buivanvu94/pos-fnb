@@ -13,6 +13,12 @@ export interface ApprovalResultData {
   lyDo: string;
 }
 
+export type ApprovalActionCallback = (approval: ApprovalResultData) => Promise<{
+  ok: boolean;
+  error?: string;
+  status?: number;
+}>;
+
 export function useManagerApproval() {
   const [modalState, setModalState] = useState<{
     open: boolean;
@@ -31,53 +37,72 @@ export function useManagerApproval() {
     loading: false,
   });
 
-  const resolverRef = useRef<((val: ApprovalResultData | null) => void) | null>(null);
+  const actionRef = useRef<ApprovalActionCallback | null>(null);
 
   const requestApproval = useCallback(
-    (options: RequestApprovalOptions): Promise<ApprovalResultData | null> => {
-      return new Promise((resolve) => {
-        resolverRef.current = resolve;
-        setModalState({
-          open: true,
-          title: options.title,
-          actionDescription: options.actionDescription,
-          isPinRequired: options.isPinRequired ?? true,
-          errorMessage: null,
-          lockoutUntil: null,
-          loading: false,
-        });
-      });
+    (
+      options: RequestApprovalOptions,
+      onConfirmAction: ApprovalActionCallback,
+    ) => {
+      actionRef.current = onConfirmAction;
+      setModalState((prev) => ({
+        ...prev,
+        open: true,
+        title: options.title,
+        actionDescription: options.actionDescription,
+        isPinRequired: options.isPinRequired ?? true,
+        errorMessage: null,
+        loading: false,
+      }));
     },
     [],
   );
 
-  const handleConfirm = useCallback((result: ApprovalResultData) => {
-    if (resolverRef.current) {
-      resolverRef.current(result);
-      resolverRef.current = null;
+  const handleConfirm = useCallback(async (result: ApprovalResultData) => {
+    if (!actionRef.current) return;
+
+    setModalState((prev) => ({ ...prev, loading: true, errorMessage: null }));
+
+    try {
+      const res = await actionRef.current(result);
+      if (res.ok) {
+        setModalState((prev) => ({
+          ...prev,
+          open: false,
+          loading: false,
+          errorMessage: null,
+        }));
+        actionRef.current = null;
+      } else {
+        const isLockout = res.status === 429;
+        setModalState((prev) => ({
+          ...prev,
+          loading: false,
+          errorMessage: res.error || "Thao tác không thành công",
+          lockoutUntil: isLockout ? Date.now() + 5 * 60 * 1000 : prev.lockoutUntil,
+        }));
+      }
+    } catch {
+      setModalState((prev) => ({
+        ...prev,
+        loading: false,
+        errorMessage: "Lỗi kết nối khi thực hiện phê duyệt",
+      }));
     }
-    setModalState((prev) => ({ ...prev, open: false }));
   }, []);
 
   const handleCancel = useCallback(() => {
-    if (resolverRef.current) {
-      resolverRef.current(null);
-      resolverRef.current = null;
-    }
-    setModalState((prev) => ({ ...prev, open: false }));
-  }, []);
-
-  const setApprovalError = useCallback((error: string | null, lockoutUntil?: number | null) => {
+    actionRef.current = null;
     setModalState((prev) => ({
       ...prev,
-      errorMessage: error,
-      lockoutUntil: lockoutUntil ?? null,
+      open: false,
       loading: false,
+      errorMessage: null,
     }));
   }, []);
 
-  const setApprovalLoading = useCallback((loading: boolean) => {
-    setModalState((prev) => ({ ...prev, loading }));
+  const setApprovalLockout = useCallback((lockoutUntil: number | null) => {
+    setModalState((prev) => ({ ...prev, lockoutUntil }));
   }, []);
 
   return {
@@ -85,7 +110,6 @@ export function useManagerApproval() {
     requestApproval,
     handleConfirm,
     handleCancel,
-    setApprovalError,
-    setApprovalLoading,
+    setApprovalLockout,
   };
 }

@@ -11,7 +11,7 @@ import type { ActingUser } from "@/server/approvals/approval-types";
 export interface CancelOrderInput {
   lyDo: string;
   pinCode?: string;
-  expectedVersion?: number;
+  expectedVersion: number;
 }
 
 export type CancelOrderResult =
@@ -20,20 +20,22 @@ export type CancelOrderResult =
 
 /**
  * Cancels an order that may contain kitchen-printed items (FR-10, BR-03, BR-08).
- * Requires Manager approval, enqueues KOT_CANCEL print jobs, sets status DA_HUY,
- * resets table to TRONG, and records audit logs.
+ * Enforces expectedVersion (409 on conflict), sends KOT_CANCEL slips,
+ * frees table, and records comprehensive audit log with preserved tableId and items.
  */
 export async function cancelOrderWithApproval(
   orderId: number,
   input: CancelOrderInput,
   actingUser: ActingUser,
-  clientIp?: string,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<CancelOrderResult> {
   const approval = await withManagerApproval(
     actingUser,
     "CANCEL_ORDER",
     { pinCode: input.pinCode, lyDo: input.lyDo },
     clientIp,
+    userAgent,
   );
 
   if (!approval.ok) {
@@ -56,7 +58,7 @@ export async function cancelOrderWithApproval(
       if (order.status !== "DANG_PHUC_VU") {
         throw new TxAbortError("Đơn hàng không ở trạng thái đang phục vụ, không thể hủy đơn", 409);
       }
-      if (input.expectedVersion !== undefined && order.version !== input.expectedVersion) {
+      if (order.version !== input.expectedVersion) {
         throw new TxAbortError("Đơn hàng đã được cập nhật bởi phiên làm việc khác, vui lòng tải lại", 409);
       }
 
@@ -84,15 +86,11 @@ export async function cancelOrderWithApproval(
         .innerJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
         .where(and(eq(orderItems.orderId, orderId), eq(orderItems.isCancelled, false)));
 
-      // Enqueue cancel slips for items that were already sent to kitchen/bar
       const printedItems = activeItems.filter((i) => i.isPrintedKitchen);
       const kitchenItems = printedItems.filter((i) => i.targetPrinter !== "BAR");
       const barItems = printedItems.filter((i) => i.targetPrinter === "BAR");
 
-      const enqueueCancelSlip = async (
-        station: "KITCHEN" | "BAR",
-        itemsList: typeof printedItems,
-      ) => {
+      const enqueueCancelSlip = async (station: "KITCHEN" | "BAR", itemsList: typeof printedItems) => {
         if (itemsList.length === 0) return;
         const jobType = station === "BAR" ? "KOT_BAR" : "KOT_KITCHEN";
         const payload: KotCancelPayload = {
@@ -101,6 +99,7 @@ export async function cancelOrderWithApproval(
           orderCode: order.orderCode,
           tableName,
           cancelledByName: actingUser.fullName,
+          approverName: approval.approverName,
           cancelledAt: new Date().toISOString(),
           reason: approval.reason,
           targetStation: station,
@@ -110,34 +109,20 @@ export async function cancelOrderWithApproval(
             notes: i.notes,
           })),
         };
-        const job = await enqueuePrintJob(
-          {
-            orderId: order.id,
-            jobType,
-            targetPrinter: station,
-            payload,
-          },
-          tx,
-        );
+        const job = await enqueuePrintJob({ orderId: order.id, jobType, targetPrinter: station, payload }, tx);
         enqueuedJobIds.push(job.id);
       };
 
       await enqueueCancelSlip("KITCHEN", kitchenItems);
       await enqueueCancelSlip("BAR", barItems);
 
-      // Cancel all active items in order
       if (activeItems.length > 0) {
         await tx
           .update(orderItems)
-          .set({
-            isCancelled: true,
-            cancelReason: approval.reason,
-            cancelledById: userId,
-          })
+          .set({ isCancelled: true, cancelReason: approval.reason, cancelledById: userId })
           .where(and(eq(orderItems.orderId, orderId), eq(orderItems.isCancelled, false)));
       }
 
-      // Reset table status to TRONG if this is the active serving order
       if (order.tableId) {
         const [servingOrder] = await tx
           .select({ id: orders.id })
@@ -153,20 +138,16 @@ export async function cancelOrderWithApproval(
         }
       }
 
-      // Mark order DA_HUY
       await tx
         .update(orders)
-        .set({
-          status: "DA_HUY",
-          tableId: null,
-          version: order.version + 1,
-          updatedAt: new Date(),
-        })
+        .set({ status: "DA_HUY", tableId: null, version: order.version + 1, updatedAt: new Date() })
         .where(eq(orders.id, orderId));
 
       await logAudit(
         {
           userId,
+          username: actingUser.username,
+          userAgent,
           action: "CANCEL_ORDER",
           entityType: "orders",
           entityId: orderId,
@@ -174,6 +155,9 @@ export async function cancelOrderWithApproval(
           metadata: {
             orderCode: order.orderCode,
             totalAmount: order.totalAmount,
+            tableId: order.tableId,
+            tableName,
+            items: activeItems.map((i) => ({ name: i.menuItemName, quantity: i.quantity })),
             requesterId: userId,
             approverId: approval.approverId,
             approverName: approval.approverName,
@@ -188,11 +172,8 @@ export async function cancelOrderWithApproval(
       return { ok: true as const, message: "Hủy đơn hàng thành công" };
     });
 
-    // Dispatch print jobs after commit; printer errors do not abort business response
     for (const jobId of enqueuedJobIds) {
-      dispatchPrintJob(jobId).catch((err) => {
-        console.error(`Error dispatching cancel print job ${jobId}:`, err);
-      });
+      dispatchPrintJob(jobId).catch((err) => console.error(`Error dispatching cancel job ${jobId}:`, err));
     }
 
     return res;

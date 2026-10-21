@@ -14,16 +14,19 @@ export const MAX_PIN_FAILURES = 5;
  * Counter and lockout reside on the acting user record.
  * Executes in an independent committed transaction so outer business rollbacks
  * cannot erase failed attempts or lockout status.
+ * Managers are evaluated in a stable order (ORDER BY users.id).
  */
 export async function verifyManagerPin(
   actingUserId: number,
   pin: string,
-  clientIp?: string,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<PinVerifyResult> {
   return await db.transaction(async (tx) => {
     const [actingUser] = await tx
       .select({
         id: users.id,
+        username: users.username,
         pinFailedCount: users.pinFailedCount,
         pinLockedUntil: users.pinLockedUntil,
       })
@@ -72,7 +75,8 @@ export async function verifyManagerPin(
           pinHash: users.pinHash,
         })
         .from(users)
-        .where(and(eq(users.role, "QUAN_LY"), isNotNull(users.pinHash)));
+        .where(and(eq(users.role, "QUAN_LY"), isNotNull(users.pinHash)))
+        .orderBy(users.id);
 
       for (const mgr of activeManagers) {
         if (mgr.pinHash && (await bcrypt.compare(pin, mgr.pinHash))) {
@@ -119,16 +123,18 @@ export async function verifyManagerPin(
       })
       .where(eq(users.id, actingUserId));
 
-    // Audit failed attempt
+    // Audit failed attempt (never log PIN)
     await logAudit(
       {
         userId: actingUserId,
+        username: actingUser.username,
         action: "PIN_FAILED",
         entityType: "users",
         entityId: actingUserId,
         reason: `Nhập sai mã PIN (lần ${nextFailedCount})`,
         metadata: { failedCount: nextFailedCount },
         ipAddress: clientIp,
+        userAgent,
       },
       tx,
     );
@@ -137,6 +143,7 @@ export async function verifyManagerPin(
       await logAudit(
         {
           userId: actingUserId,
+          username: actingUser.username,
           action: "PIN_LOCKED",
           entityType: "users",
           entityId: actingUserId,
@@ -146,6 +153,7 @@ export async function verifyManagerPin(
             lockedUntil: lockedUntil?.toISOString(),
           },
           ipAddress: clientIp,
+          userAgent,
         },
         tx,
       );

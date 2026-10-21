@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/server/auth/require-role";
 import { cancelOrderWithApproval } from "@/server/orders/cancel-order-service";
-import { getClientIp } from "@/server/approvals/ip-helper";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -12,19 +12,18 @@ const cancelOrderSchema = z.object({
   lyDo: z
     .string({ required_error: "Lý do hủy đơn là bắt buộc" })
     .transform((val) => val.trim())
-    .refine((val) => val.length >= 5, {
-      message: "Lý do phải có tối thiểu 5 ký tự",
-    })
     .refine((val) => val.length <= 255, {
       message: "Lý do không được vượt quá 255 ký tự",
     }),
   pinCode: z.string().optional(),
-  expectedVersion: z.number().int().positive().optional(),
+  expectedVersion: z.number({ required_error: "expectedVersion là bắt buộc" }).int().positive(),
 });
 
 /**
  * POST /api/v1/orders/:id/cancel
  * Cancels an active order with kitchen-printed items via Manager approval (FR-10, BR-03).
+ * Requires expectedVersion for optimistic locking (409 on conflict).
+ * Validates role permissions before reason length so unauthorized roles receive 403 Forbidden.
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
   const auth = await requireRole(req);
@@ -55,11 +54,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   }
 
   const clientIp = getClientIp(req);
+  const userAgent = getUserAgent(req);
+
   const result = await cancelOrderWithApproval(
     orderId,
     parsed.data,
     auth.user,
     clientIp,
+    userAgent,
   );
 
   if (!result.ok) {

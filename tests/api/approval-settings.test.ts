@@ -8,7 +8,7 @@ import * as schema from "@/db/schema";
 import { GET as getSettingHandler, PUT as updateSettingHandler } from "@/app/api/v1/settings/approval/route";
 import { POST as discountHandler } from "@/app/api/v1/orders/[id]/discount/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
-import { setPinRequired, isPinRequired } from "@/server/approvals/approval-settings-service";
+import { setPinRequired, isPinRequired, APPROVAL_PIN_REQUIRED_KEY } from "@/server/approvals/approval-settings-service";
 import { getTestDbUrl } from "../setup/test-config";
 
 describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Section 10)", () => {
@@ -42,7 +42,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
         fullName: "Quản Lý Test Cấu Hình",
         role: "QUAN_LY",
         passwordHash: "dummy",
-        pinHash: await bcrypt.hash("1234", 10),
+        pinHash: await bcrypt.hash("8391", 10),
       })
       .returning();
     managerId = manager.id;
@@ -97,6 +97,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     await setPinRequired(initialPinRequired);
 
     if (db) {
+      await db.delete(schema.auditLogs).where(eq(schema.auditLogs.entityType, "settings"));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, shiftId));
       await db.delete(schema.tables).where(eq(schema.tables.id, tableId));
       await db.delete(schema.areas).where(eq(schema.areas.id, areaId));
@@ -137,7 +138,30 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     expect(res.status).toBe(403);
   });
 
-  it("allows QUAN_LY to toggle pinRequired to false", async () => {
+  it("forbids disabling pinRequired in production environment (HTTP 403)", async () => {
+    const originalEnv = process.env.NODE_ENV;
+    try {
+      (process.env as any).NODE_ENV = "production";
+
+      const req = new NextRequest("http://localhost:3000/api/v1/settings/approval", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+        },
+        body: JSON.stringify({ pinRequired: false }),
+      });
+
+      const res = await updateSettingHandler(req);
+      expect(res.status).toBe(403);
+      const data = await res.json();
+      expect(data.error).toContain("Không thể tắt yêu cầu mã PIN trong môi trường production");
+    } finally {
+      (process.env as any).NODE_ENV = originalEnv;
+    }
+  });
+
+  it("allows QUAN_LY to toggle pinRequired and writes SETTINGS_CHANGED audit log", async () => {
     const req = new NextRequest("http://localhost:3000/api/v1/settings/approval", {
       method: "PUT",
       headers: {
@@ -155,6 +179,21 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     expect(body.data.pinRequired).toBe(false);
 
     expect(await isPinRequired()).toBe(false);
+
+    // Verify SETTINGS_CHANGED audit log
+    const [audit] = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(
+        and(
+          eq(schema.auditLogs.action, "SETTINGS_CHANGED"),
+          eq(schema.auditLogs.entityId, APPROVAL_PIN_REQUIRED_KEY),
+        ),
+      );
+    expect(audit).toBeDefined();
+    const meta = JSON.parse(audit.metadata!);
+    expect(meta.key).toBe(APPROVAL_PIN_REQUIRED_KEY);
+    expect(meta.newValue).toBe(false);
   });
 
   it("when pinRequired is false, cashier applies discount without PIN (reason & audit still mandatory)", async () => {
@@ -173,7 +212,6 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
       })
       .returning();
 
-    // Cashier sends discount request without pinCode
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
       method: "POST",
       headers: {
@@ -194,7 +232,6 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     expect(body.ok).toBe(true);
     expect(body.data.discountAmount).toBe(10000);
 
-    // Verify audit log was still written
     const audit = await db
       .select()
       .from(schema.auditLogs)

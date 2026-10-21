@@ -5,6 +5,10 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
+import { verifyUserPassword } from "@/server/auth/login-lockout-service";
+import { validatePinPolicy } from "@/server/approvals/pin-policy";
+import { logAudit } from "@/server/approvals/audit-log-service";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 const updatePinSchema = z.object({
   currentPassword: z.string({ required_error: "Mật khẩu hiện tại là bắt buộc" }),
@@ -16,7 +20,8 @@ const updatePinSchema = z.object({
 /**
  * PUT /api/v1/users/me/pin
  * Manager sets or changes their own PIN after verifying current password.
- * Resets failed count and lockout upon successful PIN change.
+ * Enforces PIN complexity policy and lockout on wrong password attempts.
+ * Records PIN_CHANGED audit log (never plaintext PIN).
  */
 export async function PUT(req: NextRequest) {
   const auth = await requireRole(req, "QUAN_LY");
@@ -37,34 +42,38 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const [user] = await db
-    .select({
-      id: users.id,
-      passwordHash: users.passwordHash,
-    })
-    .from(users)
-    .where(eq(users.id, auth.user.userId))
-    .limit(1);
+  const clientIp = getClientIp(req);
+  const userAgent = getUserAgent(req);
 
-  if (!user) {
+  // 1. Password verification with shared login failure/lockout tracking
+  const passwordResult = await verifyUserPassword(
+    auth.user.userId,
+    parsed.data.currentPassword,
+    clientIp,
+    userAgent,
+  );
+
+  if (!passwordResult.ok) {
     return NextResponse.json(
-      { ok: false, error: "Tài khoản không tồn tại" },
-      { status: 404 },
+      { ok: false, error: passwordResult.error },
+      { status: passwordResult.status },
     );
   }
 
-  const passwordMatches = await bcrypt.compare(
-    parsed.data.currentPassword,
-    user.passwordHash,
+  // 2. PIN complexity and collision policy check
+  const policyResult = await validatePinPolicy(
+    parsed.data.newPin,
+    auth.user.userId,
   );
 
-  if (!passwordMatches) {
+  if (!policyResult.valid) {
     return NextResponse.json(
-      { ok: false, error: "Mật khẩu hiện tại không chính xác" },
+      { ok: false, error: policyResult.error || "Mã PIN không hợp lệ" },
       { status: 400 },
     );
   }
 
+  // 3. Update hashed PIN and reset PIN counters
   const newPinHash = await bcrypt.hash(parsed.data.newPin, 10);
 
   await db
@@ -75,7 +84,22 @@ export async function PUT(req: NextRequest) {
       pinLockedUntil: null,
       updatedAt: new Date(),
     })
-    .where(eq(users.id, user.id));
+    .where(eq(users.id, auth.user.userId));
+
+  // 4. Audit log (never store or log PIN)
+  await logAudit({
+    userId: auth.user.userId,
+    username: auth.user.username,
+    userAgent,
+    action: "PIN_CHANGED",
+    entityType: "users",
+    entityId: auth.user.userId,
+    reason: "Quản lý cập nhật mã PIN phê duyệt",
+    metadata: {
+      userId: auth.user.userId,
+    },
+    ipAddress: clientIp,
+  });
 
   return NextResponse.json({
     ok: true,

@@ -4,6 +4,7 @@ import { can } from "@/lib/permissions";
 import { deleteOrderSchema } from "@/server/orders/order-schema";
 import { getOrderDetails } from "@/server/orders/order-service";
 import { deleteEmptyOrder } from "@/server/orders/delete-order-service";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -51,9 +52,9 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
  * DELETE /api/v1/orders/:id
  * Cancels an empty active order that has not had any items sent to the kitchen.
  * Returns table to TRONG. Enforces status DANG_PHUC_VU and expectedVersion lock.
+ * Records DELETE_EMPTY_ORDER in audit log.
  */
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
-  // Permission verified via requireRole/can; order is already bound to shiftId established at opening
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;
@@ -88,7 +89,15 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const result = await deleteEmptyOrder(orderId, parsed.data.expectedVersion);
+    const clientIp = getClientIp(req);
+    const userAgent = getUserAgent(req);
+    const result = await deleteEmptyOrder(
+      orderId,
+      parsed.data.expectedVersion,
+      auth.user,
+      clientIp,
+      userAgent,
+    );
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },

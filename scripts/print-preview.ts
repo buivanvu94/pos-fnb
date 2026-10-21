@@ -257,3 +257,4 @@ main().catch((err) => {
   console.error("Preview generation failed:", err);
   process.exit(1);
 });
+

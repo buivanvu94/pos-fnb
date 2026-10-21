@@ -4,6 +4,8 @@ import type { DbOrTx } from "@/server/tables/table-service";
 
 export interface LogAuditParams {
   userId?: number | null;
+  username?: string | null;
+  userAgent?: string | null;
   action: string;
   entityType: string;
   entityId?: string | number | null;
@@ -14,7 +16,8 @@ export interface LogAuditParams {
 
 /**
  * Persists an audit log entry.
- * Can be executed within an existing transaction or with root db pool.
+ * Guarantees zero sensitive data (PIN, passwords) leakage.
+ * Automatically enriches metadata with username and userAgent (<= 200 chars).
  */
 export async function logAudit(
   params: LogAuditParams,
@@ -26,17 +29,28 @@ export async function logAudit(
       ? String(params.entityId)
       : null;
 
-  // Never allow PIN in metadata
-  let metadataStr: string | null = null;
-  if (params.metadata) {
-    const cleanMetadata = { ...params.metadata };
-    delete (cleanMetadata as any).pin;
-    delete (cleanMetadata as any).pinCode;
-    delete (cleanMetadata as any).newPin;
-    delete (cleanMetadata as any).password;
-    delete (cleanMetadata as any).currentPassword;
-    metadataStr = JSON.stringify(cleanMetadata);
+  const cleanMetadata: Record<string, any> = params.metadata
+    ? { ...params.metadata }
+    : {};
+
+  // Strip all sensitive credential values
+  delete cleanMetadata.pin;
+  delete cleanMetadata.pinCode;
+  delete cleanMetadata.newPin;
+  delete cleanMetadata.password;
+  delete cleanMetadata.currentPassword;
+
+  // Add username and userAgent if available
+  if (params.username && cleanMetadata.username === undefined) {
+    cleanMetadata.username = params.username;
   }
+  if (params.userAgent && cleanMetadata.userAgent === undefined) {
+    cleanMetadata.userAgent = params.userAgent.slice(0, 200);
+  }
+
+  const metadataStr = Object.keys(cleanMetadata).length > 0
+    ? JSON.stringify(cleanMetadata)
+    : null;
 
   await runner.insert(auditLogs).values({
     userId: params.userId ?? null,

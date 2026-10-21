@@ -2,13 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { POST as cancelOrderHandler } from "@/app/api/v1/orders/[id]/cancel/route";
 import { DELETE as deleteOrderHandler } from "@/app/api/v1/orders/[id]/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
-import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { getTestDbUrl } from "../setup/test-config";
 
 describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08)", () => {
@@ -31,8 +30,8 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
   let categoryId: number;
   let menuItemId: number;
 
-  const CORRECT_PIN = "6789";
-  const WRONG_PIN = "2222";
+  const CORRECT_PIN = "7294";
+  const WRONG_PIN = "0000";
 
   async function createTestOrderWithPrintedItem(status: "DANG_PHUC_VU" | "DA_THANH_TOAN" = "DANG_PHUC_VU") {
     const [table] = await db
@@ -61,7 +60,6 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
         quantity: 1,
         unitPrice: 60000,
         isPrintedKitchen: true,
-        sentAt: new Date(),
       })
       .returning();
 
@@ -152,7 +150,7 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
       .values({
         code: `MON_C_${tag}`,
         categoryId: cat.id,
-        name: "Lẩu hải sản",
+        name: "Cơm chiên hải sản",
         price: 60000,
         targetPrinter: "KITCHEN",
       })
@@ -162,7 +160,6 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
 
   afterAll(async () => {
     if (db) {
-      await db.delete(schema.printJobs).where(eq(schema.printJobs.status, "PENDING"));
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, menuItemId));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, shiftId));
       await db.delete(schema.menuItems).where(eq(schema.menuItems.categoryId, categoryId));
@@ -170,6 +167,7 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
       await db.delete(schema.tables).where(eq(schema.tables.areaId, areaId));
       await db.delete(schema.areas).where(eq(schema.areas.id, areaId));
       await db.delete(schema.shifts).where(eq(schema.shifts.id, shiftId));
+      await db.delete(schema.printJobs).where(inArray(schema.printJobs.jobType, ["KOT_KITCHEN", "KOT_BAR"]));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, waiterId));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, cashierId));
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.userId, managerId));
@@ -180,8 +178,26 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
     await pool.end();
   });
 
-  it("cancels active serving order with printed items using valid PIN, sets DA_HUY, resets table to TRONG, enqueues KOT_CANCEL, records audit", async () => {
-    const { table, order, item } = await createTestOrderWithPrintedItem("DANG_PHUC_VU");
+  it("requires expectedVersion and rejects when expectedVersion is missing", async () => {
+    const { order } = await createTestOrderWithPrintedItem();
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        lyDo: "Thiếu expectedVersion khi hủy đơn",
+      }),
+    });
+
+    const res = await cancelOrderHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(400);
+  });
+
+  it("cancels order with printed item using THU_NGAN and valid Manager PIN, enqueues slip with approverName, and saves audit metadata", async () => {
+    const { order, table, item } = await createTestOrderWithPrintedItem();
 
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/cancel`, {
       method: "POST",
@@ -202,19 +218,16 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
     const body = await res.json();
     expect(body.ok).toBe(true);
 
-    // Verify order is DA_HUY
     const [updatedOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, order.id));
     expect(updatedOrder.status).toBe("DA_HUY");
 
-    // Verify table returned to TRONG
     const [updatedTable] = await db.select().from(schema.tables).where(eq(schema.tables.id, table.id));
     expect(updatedTable.status).toBe("TRONG");
 
-    // Verify item marked cancelled
     const [updatedItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.id, item.id));
     expect(updatedItem.isCancelled).toBe(true);
 
-    // Verify KOT_CANCEL print job enqueued
+    // Verify KOT_CANCEL print job enqueued with approverName
     const printJobs = await db
       .select()
       .from(schema.printJobs)
@@ -224,14 +237,22 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
     const payload = JSON.parse(cancelJob.payload);
     expect(payload.kind).toBe("KOT_CANCEL");
     expect(payload.reason).toBe("Khách có việc bận gấp xin hủy toàn bộ đơn");
+    expect(payload.approverName).toBe("Quản Lý Test Hủy Đơn");
+    expect(payload.cancelledByName).toBe("Thu Ngân Test Hủy Đơn");
 
-    // Verify CANCEL_ORDER audit log
-    const auditEntries = await db
+    // Verify CANCEL_ORDER audit log has tableId, tableName, and items
+    const [audit] = await db
       .select()
       .from(schema.auditLogs)
       .where(and(eq(schema.auditLogs.action, "CANCEL_ORDER"), eq(schema.auditLogs.entityId, String(order.id))));
-    expect(auditEntries.length).toBe(1);
-    expect(auditEntries[0].reason).toBe("Khách có việc bận gấp xin hủy toàn bộ đơn");
+    expect(audit).toBeDefined();
+    expect(audit.reason).toBe("Khách có việc bận gấp xin hủy toàn bộ đơn");
+    const meta = JSON.parse(audit.metadata!);
+    expect(meta.tableId).toBe(table.id);
+    expect(meta.tableName).toBe(table.name);
+    expect(Array.isArray(meta.items)).toBe(true);
+    expect(meta.items.length).toBe(1);
+    expect(meta.items[0].name).toBe("Cơm chiên hải sản");
   });
 
   it("rejects cancel order when order status is DA_THANH_TOAN with 409 Conflict", async () => {
@@ -274,7 +295,7 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
     expect(res.status).toBe(409);
   });
 
-  it("blocks PHUC_VU role from cancelling order with 403 Forbidden even with correct Manager PIN (SRS 2.5)", async () => {
+  it("blocks PHUC_VU role with 403 even when reason is under 5 chars", async () => {
     const { order } = await createTestOrderWithPrintedItem("DANG_PHUC_VU");
 
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/cancel`, {
@@ -284,7 +305,7 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
         Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`,
       },
       body: JSON.stringify({
-        lyDo: "Phục vụ xin hủy đơn hàng này",
+        lyDo: "Hủy", // 3 chars
         pinCode: CORRECT_PIN,
         expectedVersion: 1,
       }),
@@ -294,7 +315,7 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
     expect(res.status).toBe(403);
   });
 
-  it("retains empty order DELETE functionality without requiring PIN", async () => {
+  it("retains empty order DELETE functionality and writes DELETE_EMPTY_ORDER audit log", async () => {
     const [table] = await db
       .insert(schema.tables)
       .values({ code: `T_EMP_${rand()}`, name: `Bàn Trống_${rand()}`, areaId, capacity: 4, status: "DANG_DUNG" })
@@ -327,5 +348,18 @@ describe("Cancel Order API - POST /api/v1/orders/:id/cancel (FR-10, BR-03, BR-08
 
     const [updatedOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, emptyOrder.id));
     expect(updatedOrder.status).toBe("DA_HUY");
+
+    // Verify DELETE_EMPTY_ORDER audit log
+    const [audit] = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.action, "DELETE_EMPTY_ORDER"), eq(schema.auditLogs.entityId, String(emptyOrder.id))));
+    expect(audit).toBeDefined();
+    const meta = JSON.parse(audit.metadata!);
+    expect(meta.orderCode).toBe(emptyOrder.orderCode);
+    expect(meta.tableId).toBe(table.id);
   });
 });
+
+
+

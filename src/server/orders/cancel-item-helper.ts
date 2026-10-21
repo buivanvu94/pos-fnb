@@ -1,54 +1,38 @@
 import { eq } from "drizzle-orm";
 import { orderItems, tables, menuItems, type Order, type OrderItem } from "@/db/schema";
-import { withManagerApproval } from "@/server/approvals/with-manager-approval";
 import { logAudit } from "@/server/approvals/audit-log-service";
 import { enqueuePrintJob } from "@/server/printing/print-service";
 import type { KotCancelPayload } from "@/server/printing/print-payload-types";
-import { TxAbortError } from "./tx-abort-error";
-import type { ActingUser } from "@/server/approvals/approval-types";
+import type { ActingUser, ApprovalResult } from "@/server/approvals/approval-types";
 
 interface CancelPrintedItemOptions {
   tx: any;
   order: Order;
   item: OrderItem;
   quantityToCancel: number;
-  pinCode?: string;
-  lyDo?: string;
-  actingUser?: ActingUser;
-  clientIp?: string;
+  approval: ApprovalResult & { ok: true };
+  actingUser: ActingUser;
+  clientIp?: string | null;
+  userAgent?: string | null;
   enqueuedJobIds: number[];
 }
 
 /**
- * Handles cancellation or quantity reduction of items already sent to the kitchen (BR-03, FR-10).
- * Requires Manager PIN, enqueues KOT_CANCEL print job, marks cancellation/reduction, and logs audit.
+ * Applies cancellation or quantity reduction of items already sent to the kitchen (BR-03, FR-10).
+ * Assumes approval was already verified BEFORE the outer transaction to avoid nested connection starvation.
+ * Enqueues KOT_CANCEL print job with approverName, updates line item status, and logs audit.
  */
 export async function handleCancelPrintedItem({
   tx,
   order,
   item,
   quantityToCancel,
-  pinCode,
-  lyDo,
+  approval,
   actingUser,
   clientIp,
+  userAgent,
   enqueuedJobIds,
 }: CancelPrintedItemOptions): Promise<void> {
-  if (!actingUser || !lyDo) {
-    throw new TxAbortError("Không thể sửa hoặc xóa món đã gửi bếp. Vui lòng liên hệ Quản lý để hủy món!", 409);
-  }
-
-  const approval = await withManagerApproval(
-    actingUser,
-    "CANCEL_KITCHEN_ITEM",
-    { pinCode, lyDo },
-    clientIp,
-  );
-
-  if (!approval.ok) {
-    throw new TxAbortError(approval.error, approval.status);
-  }
-
   const userId = actingUser.userId ?? actingUser.id!;
 
   const [mItem] = await tx
@@ -98,6 +82,7 @@ export async function handleCancelPrintedItem({
     orderCode: order.orderCode,
     tableName,
     cancelledByName: actingUser.fullName,
+    approverName: approval.approverName,
     cancelledAt: new Date().toISOString(),
     reason: approval.reason,
     targetStation: station,
@@ -124,6 +109,8 @@ export async function handleCancelPrintedItem({
   await logAudit(
     {
       userId,
+      username: actingUser.username,
+      userAgent,
       action,
       entityType: "order_items",
       entityId: item.id,

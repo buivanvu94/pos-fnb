@@ -5,26 +5,19 @@ import type { ActingUser, ApprovalRequest, ApprovalResult } from "./approval-typ
 
 /**
  * Common authorization and PIN approval gate for sensitive operations (FR-10, BR-03, BR-04, SRS 2.5).
- * Validates role permissions, reason length (>= 5 chars), and Manager PIN when required.
+ * IMPORTANT: Checks role permission matrix (can()) BEFORE reason length so unauthorized
+ * roles receive 403 Forbidden regardless of reason format.
  */
 export async function withManagerApproval(
   actingUser: ActingUser,
   action: PermissionAction,
   request: ApprovalRequest,
-  clientIp?: string,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<ApprovalResult> {
-  const reason = (request.lyDo ?? "").trim();
-  if (reason.length < 5) {
-    return {
-      ok: false,
-      status: 400,
-      error: "Lý do phải có tối thiểu 5 ký tự",
-    };
-  }
-
   const userId = actingUser.userId ?? actingUser.id!;
 
-  // 1. Role permission matrix check (SRS Section 2.5)
+  // 1. Role permission matrix check FIRST (SRS Section 2.5)
   // Even with valid PIN, roles with 'KHONG' (e.g. PHUC_VU for DISCOUNT) cannot execute the action
   const isPermittedWithPin = can(actingUser.role, action, { hasManagerPin: true });
   if (!isPermittedWithPin) {
@@ -35,7 +28,17 @@ export async function withManagerApproval(
     };
   }
 
-  // 2. Managers performing their own sensitive actions do not require PIN
+  // 2. Reason length check (min 5 chars after trim, BR-03)
+  const reason = (request.lyDo ?? "").trim();
+  if (reason.length < 5) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Lý do phải có tối thiểu 5 ký tự",
+    };
+  }
+
+  // 3. Managers performing their own sensitive actions do not require PIN
   if (actingUser.role === "QUAN_LY") {
     return {
       ok: true,
@@ -45,7 +48,7 @@ export async function withManagerApproval(
     };
   }
 
-  // 3. Check configuration flag: approval.pinRequired (SRS Section 10)
+  // 4. Check configuration flag: approval.pinRequired (SRS Section 10)
   const pinRequired = await isPinRequired();
   if (!pinRequired) {
     return {
@@ -56,7 +59,7 @@ export async function withManagerApproval(
     };
   }
 
-  // 4. Validate Manager PIN for THU_NGAN / PHUC_VU
+  // 5. Validate Manager PIN for THU_NGAN / PHUC_VU
   if (!request.pinCode || typeof request.pinCode !== "string") {
     return {
       ok: false,
@@ -65,7 +68,7 @@ export async function withManagerApproval(
     };
   }
 
-  const verifyResult = await verifyManagerPin(userId, request.pinCode, clientIp);
+  const verifyResult = await verifyManagerPin(userId, request.pinCode, clientIp, userAgent);
   if (!verifyResult.valid) {
     return {
       ok: false,

@@ -1,7 +1,9 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { orders, orderItems, tables } from "@/db/schema";
+import { logAudit } from "@/server/approvals/audit-log-service";
 import { TxAbortError } from "./tx-abort-error";
+import type { ActingUser } from "@/server/approvals/approval-types";
 
 export type DeleteOrderResult =
   | { ok: true; message: string }
@@ -10,11 +12,14 @@ export type DeleteOrderResult =
 /**
  * Cancels an empty active order that has no line items sent to the kitchen.
  * Enforces status check (must be DANG_PHUC_VU), empty order check, and optimistic locking.
- * Only resets table status to TRONG if this order is the table's current serving order.
+ * Resets table status to TRONG and logs DELETE_EMPTY_ORDER audit record.
  */
 export async function deleteEmptyOrder(
   orderId: number,
   expectedVersion?: number,
+  actingUser?: ActingUser,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<DeleteOrderResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -72,6 +77,24 @@ export async function deleteEmptyOrder(
           updatedAt: new Date(),
         })
         .where(eq(orders.id, orderId));
+
+      await logAudit(
+        {
+          userId: actingUser?.userId ?? actingUser?.id ?? null,
+          username: actingUser?.username,
+          userAgent,
+          action: "DELETE_EMPTY_ORDER",
+          entityType: "orders",
+          entityId: orderId,
+          reason: "Hủy đơn hàng rỗng",
+          metadata: {
+            orderCode: order.orderCode,
+            tableId: order.tableId,
+          },
+          ipAddress: clientIp,
+        },
+        tx,
+      );
 
       return { ok: true, message: "Hủy đơn hàng thành công" };
     });

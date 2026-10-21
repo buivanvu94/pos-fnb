@@ -15,7 +15,7 @@ import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service
 
 const { Title, Text } = Typography;
 
-interface OrderingViewProps {
+export interface OrderingViewProps {
   table: TableWithOrderInfo;
   orderId: number;
   allTables: TableWithOrderInfo[];
@@ -47,6 +47,7 @@ export function OrderingView({
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountError, setDiscountError] = useState<string | null>(null);
+  const [discountLockoutUntil, setDiscountLockoutUntil] = useState<number | null>(null);
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -64,11 +65,23 @@ export function OrderingView({
     }
   }, [orderId, message]);
 
-  const { actionLoading, sendingKitchen, quickAdd, addCustomized, changeQuantity, deleteItem, sendKitchen, cancelEmptyOrder } =
-    useOrderActions(order, setOrder, fetchOrder, onTableStatusChanged);
+  const {
+    actionLoading,
+    sendingKitchen,
+    quickAdd,
+    addCustomized,
+    changeQuantity,
+    deleteItem,
+    sendKitchen,
+    cancelEmptyOrder,
+  } = useOrderActions(order, setOrder, fetchOrder, onTableStatusChanged);
 
-  const { approvalLoading, cancelKitchenItem, applyDiscount, cancelOrderWithItems } =
-    useOrderApprovalActions(order, setOrder, fetchOrder, onTableStatusChanged);
+  const {
+    approvalLoading,
+    cancelKitchenItem,
+    applyDiscount,
+    cancelOrderWithItems,
+  } = useOrderApprovalActions(order, setOrder, fetchOrder, onTableStatusChanged);
 
   const { modalState, requestApproval, handleConfirm, handleCancel } = useManagerApproval();
 
@@ -85,27 +98,34 @@ export function OrderingView({
     fetch("/api/v1/menu/toppings").then((r) => r.json()).then((d) => d.ok && setToppings(d.data || [])).catch(() => {});
   }, [fetchOrder]);
 
-  const handleCancelKitchenItemClick = async (item: OrderItemDetail) => {
-    const approval = await requestApproval({
-      title: "Hủy món đã gửi bếp",
-      actionDescription: `Món: ${item.menuItemName} (Số lượng: ${item.quantity})`,
-      isPinRequired: userRole !== "QUAN_LY",
-    });
-    if (approval) {
-      await cancelKitchenItem(item, approval);
-    }
+  const handleCancelKitchenItemClick = (item: OrderItemDetail) => {
+    requestApproval(
+      {
+        title: "Hủy món đã gửi bếp",
+        actionDescription: `Món: ${item.menuItemName} (Số lượng: ${item.quantity})`,
+        isPinRequired: userRole !== "QUAN_LY",
+      },
+      async (approval) => {
+        return await cancelKitchenItem(item, approval);
+      },
+    );
   };
 
-  const handleCancelOrderWithItemsClick = async () => {
-    const approval = await requestApproval({
-      title: "Hủy đơn hàng",
-      actionDescription: `Mã đơn: ${order?.orderCode}`,
-      isPinRequired: userRole !== "QUAN_LY",
-    });
-    if (approval) {
-      const res = await cancelOrderWithItems(approval);
-      if (res.ok) onBackToTables();
-    }
+  const handleCancelOrderWithItemsClick = () => {
+    requestApproval(
+      {
+        title: "Hủy đơn hàng",
+        actionDescription: `Mã đơn: ${order?.orderCode}`,
+        isPinRequired: userRole !== "QUAN_LY",
+      },
+      async (approval) => {
+        const res = await cancelOrderWithItems(approval);
+        if (res.ok) {
+          onBackToTables();
+        }
+        return res;
+      },
+    );
   };
 
   const handleConfirmDiscount = async (data: { amount?: number; percent?: number; pinCode?: string; lyDo: string }) => {
@@ -113,8 +133,12 @@ export function OrderingView({
     const res = await applyDiscount(data);
     if (res.ok) {
       setDiscountModalOpen(false);
+      setDiscountLockoutUntil(null);
     } else {
       setDiscountError(res.error || "Không thể áp dụng giảm giá");
+      if (res.status === 429) {
+        setDiscountLockoutUntil(Date.now() + 5 * 60 * 1000);
+      }
     }
   };
 
@@ -224,9 +248,13 @@ export function OrderingView({
         totalAmount={order?.totalAmount ?? 0}
         isPinRequired={userRole !== "QUAN_LY"}
         errorMessage={discountError}
+        lockoutUntil={discountLockoutUntil}
         loading={approvalLoading}
         onConfirm={handleConfirmDiscount}
-        onCancel={() => setDiscountModalOpen(false)}
+        onCancel={() => {
+          setDiscountModalOpen(false);
+          setDiscountError(null);
+        }}
       />
     </div>
   );

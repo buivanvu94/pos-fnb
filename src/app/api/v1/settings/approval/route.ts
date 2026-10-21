@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireRole } from "@/server/auth/require-role";
-import { isPinRequired, setPinRequired } from "@/server/approvals/approval-settings-service";
+import {
+  isPinRequired,
+  setPinRequired,
+  APPROVAL_PIN_REQUIRED_KEY,
+} from "@/server/approvals/approval-settings-service";
+import { logAudit } from "@/server/approvals/audit-log-service";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 const updateApprovalSettingSchema = z.object({
   pinRequired: z.boolean({
@@ -30,7 +36,8 @@ export async function GET(req: NextRequest) {
 /**
  * PUT /api/v1/settings/approval
  * Sets whether Manager PIN approval is required (restricted to QUAN_LY).
- * WARNING: Disabling PIN requirement is strictly intended for testing environments only.
+ * In production: disabling PIN requirement is forbidden (403).
+ * Always logs SETTINGS_CHANGED audit entry with previous and new values.
  */
 export async function PUT(req: NextRequest) {
   const auth = await requireRole(req, "QUAN_LY");
@@ -51,7 +58,39 @@ export async function PUT(req: NextRequest) {
     );
   }
 
+  if (process.env.NODE_ENV === "production" && parsed.data.pinRequired === false) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Không thể tắt yêu cầu mã PIN trong môi trường production",
+      },
+      { status: 403 },
+    );
+  }
+
+  const clientIp = getClientIp(req);
+  const userAgent = getUserAgent(req);
+  const previousValue = await isPinRequired();
+
   await setPinRequired(parsed.data.pinRequired);
+
+  await logAudit({
+    userId: auth.user.userId,
+    username: auth.user.username,
+    userAgent,
+    action: "SETTINGS_CHANGED",
+    entityType: "settings",
+    entityId: APPROVAL_PIN_REQUIRED_KEY,
+    reason: `Thay đổi cấu hình ${APPROVAL_PIN_REQUIRED_KEY} từ ${previousValue} thành ${parsed.data.pinRequired}`,
+    metadata: {
+      key: APPROVAL_PIN_REQUIRED_KEY,
+      previousValue,
+      newValue: parsed.data.pinRequired,
+      changedById: auth.user.userId,
+      changedByUsername: auth.user.username,
+    },
+    ipAddress: clientIp,
+  });
 
   return NextResponse.json({
     ok: true,

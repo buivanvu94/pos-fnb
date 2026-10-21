@@ -21,7 +21,7 @@ describe("Verify PIN API - POST /api/v1/auth/verify-pin (API-04, FR-10, BR-04)",
   let managerId: number;
   let waiterId: number;
   let waiterToken: string;
-  const CORRECT_PIN = "5678";
+  const CORRECT_PIN = "9518";
   const WRONG_PIN = "0000";
 
   beforeAll(async () => {
@@ -206,3 +206,5 @@ describe("Verify PIN API - POST /api/v1/auth/verify-pin (API-04, FR-10, BR-04)",
     expect(bodyLocked.error).toBe(ERROR_CATALOG.ERR_03.message);
   });
 });
+
+

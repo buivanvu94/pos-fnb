@@ -13,7 +13,7 @@ export interface ApplyDiscountInput {
   percent?: number;
   lyDo: string;
   pinCode?: string;
-  expectedVersion?: number;
+  expectedVersion: number;
 }
 
 export type DiscountResult =
@@ -22,19 +22,22 @@ export type DiscountResult =
 
 /**
  * Applies a discount to an active order with Manager approval (FR-10, BR-03).
- * Validates role permissions, ensures 0 <= discount <= totalAmount, and recalculates finalAmount.
+ * Persists discount_percent on percentage discounts, or null on fixed amount discounts.
+ * Enforces expectedVersion optimistic concurrency control (409 on mismatch).
  */
 export async function applyOrderDiscount(
   orderId: number,
   input: ApplyDiscountInput,
   actingUser: ActingUser,
-  clientIp?: string,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<DiscountResult> {
   const approval = await withManagerApproval(
     actingUser,
     "DISCOUNT_ORDER",
     { pinCode: input.pinCode, lyDo: input.lyDo },
     clientIp,
+    userAgent,
   );
 
   if (!approval.ok) {
@@ -56,24 +59,31 @@ export async function applyOrderDiscount(
       if (order.status !== "DANG_PHUC_VU") {
         throw new TxAbortError("Đơn hàng không ở trạng thái đang phục vụ, không thể giảm giá", 409);
       }
-      if (input.expectedVersion !== undefined && order.version !== input.expectedVersion) {
+      if (order.version !== input.expectedVersion) {
         throw new TxAbortError("Đơn hàng đã được cập nhật bởi phiên làm việc khác, vui lòng tải lại", 409);
       }
 
+      if (input.amount !== undefined && input.percent !== undefined) {
+        throw new TxAbortError("Không thể áp dụng đồng thời cả số tiền và phần trăm giảm giá", 400);
+      }
       if (input.amount === undefined && input.percent === undefined) {
         throw new TxAbortError("Cần cung cấp số tiền giảm giá hoặc phần trăm giảm giá", 400);
       }
 
       let discountAmount = 0;
+      let discountPercent: number | null = null;
+
       if (input.percent !== undefined) {
         if (input.percent < 0 || input.percent > 100) {
           throw new TxAbortError("Phần trăm giảm giá phải từ 0% đến 100%", 400);
         }
+        discountPercent = input.percent;
         discountAmount = Math.round(order.totalAmount * (input.percent / 100));
       } else if (input.amount !== undefined) {
         if (input.amount < 0) {
           throw new TxAbortError("Số tiền giảm giá không được nhỏ hơn 0 VNĐ", 400);
         }
+        discountPercent = null;
         discountAmount = input.amount;
       }
 
@@ -87,6 +97,7 @@ export async function applyOrderDiscount(
         .update(orders)
         .set({
           discountAmount,
+          discountPercent,
           finalAmount,
           version: order.version + 1,
           updatedAt: new Date(),
@@ -96,6 +107,8 @@ export async function applyOrderDiscount(
       await logAudit(
         {
           userId,
+          username: actingUser.username,
+          userAgent,
           action: "DISCOUNT",
           entityType: "orders",
           entityId: orderId,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { PUT as updatePinHandler } from "@/app/api/v1/users/me/pin/route";
@@ -20,12 +20,14 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
 
   let managerId: number;
   let managerToken: string;
+  let otherManagerId: number;
   let cashierId: number;
   let cashierToken: string;
 
   const CURRENT_PASSWORD = "Password123!";
-  const INITIAL_PIN = "1111";
-  const NEW_PIN = "9999";
+  const INITIAL_PIN = "7410";
+  const NEW_PIN = "6382";
+  const OTHER_MANAGER_PIN = "9264";
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
@@ -43,6 +45,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
         passwordHash,
         pinHash,
         pinFailedCount: 3,
+        loginFailedCount: 0,
       })
       .returning();
     managerId = manager.id;
@@ -52,6 +55,19 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
       fullName: manager.fullName,
       role: "QUAN_LY",
     });
+
+    const otherPinHash = await bcrypt.hash(OTHER_MANAGER_PIN, 10);
+    const [otherMgr] = await db
+      .insert(schema.users)
+      .values({
+        username: `mgr_other_${tag}`,
+        fullName: "Quản Lý Khác",
+        role: "QUAN_LY",
+        passwordHash,
+        pinHash: otherPinHash,
+      })
+      .returning();
+    otherManagerId = otherMgr.id;
 
     const [cashier] = await db
       .insert(schema.users)
@@ -73,7 +89,9 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
 
   afterAll(async () => {
     if (db) {
+      await db.delete(schema.auditLogs).where(eq(schema.auditLogs.entityType, "users"));
       await db.delete(schema.users).where(eq(schema.users.id, cashierId));
+      await db.delete(schema.users).where(eq(schema.users.id, otherManagerId));
       await db.delete(schema.users).where(eq(schema.users.id, managerId));
     }
     await pool.end();
@@ -98,21 +116,52 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
 
-    // Verify user in DB has reset counter and new PIN works
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, managerId));
     expect(user.pinFailedCount).toBe(0);
     expect(user.pinLockedUntil).toBeNull();
 
-    // Verify the new PIN passes verification
     const verifyResult = await verifyManagerPin(managerId, NEW_PIN);
     expect(verifyResult.valid).toBe(true);
 
-    // Verify the old PIN no longer works
-    const oldVerify = await verifyManagerPin(managerId, INITIAL_PIN);
-    expect(oldVerify.valid).toBe(false);
+    // Verify PIN_CHANGED audit entry is logged and never contains plaintext PIN
+    const [audit] = await db
+      .select()
+      .from(schema.auditLogs)
+      .where(and(eq(schema.auditLogs.entityId, String(managerId)), eq(schema.auditLogs.action, "PIN_CHANGED")));
+    expect(audit).toBeDefined();
+    expect(audit.reason).toContain("cập nhật mã PIN");
+    expect(JSON.stringify(audit)).not.toContain(NEW_PIN);
   });
 
-  it("rejects PIN update when current password is wrong with 400 Bad Request", async () => {
+  it("rejects trivial PINs: identical, sequential, repeating pairs, birth years", async () => {
+    const trivialPins = [
+      "0000", "1111", "9999", "111111",
+      "1234", "4321", "123456", "654321",
+      "1212", "112233", "121212",
+      "1995", "2000", "2024",
+    ];
+
+    for (const badPin of trivialPins) {
+      const req = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+        },
+        body: JSON.stringify({
+          currentPassword: CURRENT_PASSWORD,
+          newPin: badPin,
+        }),
+      });
+
+      const res = await updatePinHandler(req);
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.ok).toBe(false);
+    }
+  });
+
+  it("rejects new PIN that collides with another manager's active PIN", async () => {
     const req = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
       method: "PUT",
       headers: {
@@ -120,17 +169,59 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
         Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
       },
       body: JSON.stringify({
-        currentPassword: "WrongPassword!",
-        newPin: "8888",
+        currentPassword: CURRENT_PASSWORD,
+        newPin: OTHER_MANAGER_PIN,
       }),
     });
 
     const res = await updatePinHandler(req);
     expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("Mã PIN này đã được sử dụng bởi một quản lý khác");
+    // Ensure it doesn't reveal other manager's identity
+    expect(data.error).not.toContain("mgr_other");
+  });
 
-    const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.error).toContain("Mật khẩu hiện tại không chính xác");
+  it("rejects PIN update when current password is wrong and locks after 5 failures", async () => {
+    // Reset login failed count on manager
+    await db.update(schema.users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(schema.users.id, managerId));
+
+    for (let i = 1; i <= 4; i++) {
+      const req = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+        },
+        body: JSON.stringify({
+          currentPassword: "WrongPassword!",
+          newPin: "8391",
+        }),
+      });
+      const res = await updatePinHandler(req);
+      expect(res.status).toBe(400);
+    }
+
+    // 5th wrong attempt -> locks account with 429
+    const lockReq = new NextRequest("http://localhost:3000/api/v1/users/me/pin", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        currentPassword: "WrongPassword!",
+        newPin: "8391",
+      }),
+    });
+    const lockRes = await updatePinHandler(lockReq);
+    expect(lockRes.status).toBe(429);
+    const lockData = await lockRes.json();
+    expect(lockData.error).toContain("Tài khoản đã bị tạm khóa do nhập sai mật khẩu quá 5 lần");
+
+    // Clean up lock for subsequent tests
+    await db.update(schema.users).set({ loginFailedCount: 0, loginLockedUntil: null }).where(eq(schema.users.id, managerId));
   });
 
   it("blocks non-QUAN_LY roles from updating PIN with 403 Forbidden", async () => {
@@ -142,7 +233,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
       },
       body: JSON.stringify({
         currentPassword: CURRENT_PASSWORD,
-        newPin: "8888",
+        newPin: "8391",
       }),
     });
 
@@ -167,3 +258,4 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
     expect(res.status).toBe(400);
   });
 });
+

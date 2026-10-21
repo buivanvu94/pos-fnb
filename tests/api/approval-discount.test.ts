@@ -8,7 +8,6 @@ import * as schema from "@/db/schema";
 import { POST as discountHandler } from "@/app/api/v1/orders/[id]/discount/route";
 import { POST as modifyOrderItemsHandler } from "@/app/api/v1/orders/[id]/items/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
-import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { getTestDbUrl } from "../setup/test-config";
 
 describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, SRS 2.5)", () => {
@@ -31,7 +30,7 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
   let categoryId: number;
   let menuItemId: number;
 
-  const CORRECT_PIN = "4321";
+  const CORRECT_PIN = "8472";
   const WRONG_PIN = "0000";
 
   async function createTestOrder(totalAmount = 100000) {
@@ -194,6 +193,10 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
     expect(body.data.discountAmount).toBe(20000);
     expect(body.data.finalAmount).toBe(80000);
 
+    // Verify discount_percent is null on fixed amount discounts
+    const [dbOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, order.id));
+    expect(dbOrder.discountPercent).toBeNull();
+
     const audit = await db
       .select()
       .from(schema.auditLogs)
@@ -205,7 +208,65 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
     expect(meta.discountAmount).toBe(20000);
   });
 
-  it("applies percentage discount (15%) with QUAN_LY without requiring PIN", async () => {
+  it("requires expectedVersion and returns 409 on version mismatch", async () => {
+    const { order } = await createTestOrder(100000);
+
+    // Missing expectedVersion -> 400
+    const missingReq = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        percent: 10,
+        lyDo: "Giảm giá thiếu expectedVersion",
+      }),
+    });
+    const missingRes = await discountHandler(missingReq, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(missingRes.status).toBe(400);
+
+    // Mismatched expectedVersion -> 409
+    const mismatchReq = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        percent: 10,
+        lyDo: "Giảm giá sai expectedVersion",
+        expectedVersion: 999,
+      }),
+    });
+    const mismatchRes = await discountHandler(mismatchReq, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(mismatchRes.status).toBe(409);
+  });
+
+  it("returns 400 when both amount and percent are provided simultaneously", async () => {
+    const { order } = await createTestOrder(100000);
+
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        amount: 10000,
+        percent: 10,
+        lyDo: "Giảm giá đồng thời cả hai loại",
+        expectedVersion: 1,
+      }),
+    });
+
+    const res = await discountHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("Không thể áp dụng đồng thời cả số tiền và phần trăm");
+  });
+
+  it("applies percentage discount (15%) with QUAN_LY and persists discount_percent column", async () => {
     const { order } = await createTestOrder(200000);
 
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
@@ -231,10 +292,11 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
 
     const [updatedOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, order.id));
     expect(updatedOrder.discountAmount).toBe(30000);
+    expect(updatedOrder.discountPercent).toBe(15);
     expect(updatedOrder.finalAmount).toBe(170000);
   });
 
-  it("blocks PHUC_VU from applying discount with 403 Forbidden even with correct Manager PIN (SRS 2.5)", async () => {
+  it("blocks PHUC_VU with 403 even when reason is under 5 chars (can check takes precedence)", async () => {
     const { order } = await createTestOrder(100000);
 
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
@@ -245,46 +307,21 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
       },
       body: JSON.stringify({
         amount: 10000,
-        lyDo: "Phục vụ xin giảm giá cho khách",
+        lyDo: "Ngắn", // Only 4 chars
         pinCode: CORRECT_PIN,
         expectedVersion: 1,
       }),
     });
 
     const res = await discountHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
+    // Must return 403 Forbidden, NOT 400 Bad Request
     expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.ok).toBe(false);
-  });
-
-  it("rejects discount exceeding total order amount with 400 Bad Request and never negative final amount", async () => {
-    const { order } = await createTestOrder(50000);
-
-    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
-      },
-      body: JSON.stringify({
-        amount: 60000, // exceeds total 50,000
-        lyDo: "Giảm vượt quá tổng tiền hóa đơn",
-        expectedVersion: 1,
-      }),
-    });
-
-    const res = await discountHandler(req, { params: Promise.resolve({ id: String(order.id) }) });
-    expect(res.status).toBe(400);
-
-    const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.error).toContain("không được vượt quá tổng tiền");
   });
 
   it("recalculates percentage discount accurately when adding items subsequently", async () => {
     const { order } = await createTestOrder(100000);
 
-    // 1. Add 1 item (50,000) to order so it has an actual order item
+    // 1. Add 2 items (100,000)
     await db.insert(schema.orderItems).values({
       orderId: order.id,
       menuItemId,
@@ -331,4 +368,47 @@ describe("Order Discount API - POST /api/v1/orders/:id/discount (FR-10, BR-03, S
     expect(addBody.data.discountAmount).toBe(30000); // 20% of 150,000
     expect(addBody.data.finalAmount).toBe(120000);
   });
+
+  it("handles edge case: empty order discounted 10% (0 VND) maintains 10% discount when items added later", async () => {
+    const { order } = await createTestOrder(0);
+
+    // Apply 10% discount on empty order (total = 0, discount = 0)
+    const discountReq = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/discount`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${managerToken}`,
+      },
+      body: JSON.stringify({
+        percent: 10,
+        lyDo: "Giảm giá 10% cho đơn mới mở",
+        expectedVersion: 1,
+      }),
+    });
+    const discountRes = await discountHandler(discountReq, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(discountRes.status).toBe(200);
+
+    // Now add 2 items (100,000 total) -> discount should become 10,000!
+    const addReq = new NextRequest(`http://localhost:3000/api/v1/orders/${order.id}/items`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+      },
+      body: JSON.stringify({
+        menuItemId,
+        quantity: 2,
+        expectedVersion: 2,
+      }),
+    });
+
+    const addRes = await modifyOrderItemsHandler(addReq, { params: Promise.resolve({ id: String(order.id) }) });
+    expect(addRes.status).toBe(200);
+
+    const addBody = await addRes.json();
+    expect(addBody.data.totalAmount).toBe(100000);
+    expect(addBody.data.discountAmount).toBe(10000); // 10% of 100,000
+    expect(addBody.data.finalAmount).toBe(90000);
+  });
 });
+

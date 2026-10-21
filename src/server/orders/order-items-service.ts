@@ -9,6 +9,8 @@ import { calculateOrderTotal } from "./order-total-calculator";
 import { TxAbortError } from "./tx-abort-error";
 import { handleCancelPrintedItem } from "./cancel-item-helper";
 import { recalculateOrderDiscount } from "./recalculate-discount-helper";
+import { precheckItemApproval } from "./precheck-approval-helper";
+import { logAudit } from "@/server/approvals/audit-log-service";
 import { dispatchPrintJob } from "@/server/printing/print-service";
 import type { ActingUser } from "@/server/approvals/approval-types";
 
@@ -19,32 +21,25 @@ export type ModifyResult =
   | { ok: true; order: OrderDetail }
   | { ok: false; error: string; status: number };
 
-/**
- * Modifies items in an active order (FR-02, BR-03, BR-09, ERR-07).
- * Supports adding items, changing quantity, deleting unprinted items,
- * cancelling/reducing printed items with Manager PIN approval, and optimistic locking.
- */
 export async function modifyOrderItems(
   orderId: number,
   input: ModifyOrderItemsInput,
   actingUser?: ActingUser,
-  clientIp?: string,
+  clientIp?: string | null,
+  userAgent?: string | null,
 ): Promise<ModifyResult> {
+  const approval = await precheckItemApproval(orderId, input, actingUser, clientIp, userAgent);
+  if (approval && !approval.ok) {
+    return { ok: false, error: approval.error, status: approval.status };
+  }
+
   const enqueuedJobIds: number[] = [];
 
   try {
     const res = await db.transaction(async (tx) => {
-      const [order] = await tx
-        .select()
-        .from(orders)
-        .where(eq(orders.id, orderId))
-        .limit(1)
-        .for("update");
-
+      const [order] = await tx.select().from(orders).where(eq(orders.id, orderId)).limit(1).for("update");
       if (!order) throw new TxAbortError("Đơn hàng không tồn tại", 404);
-      if (order.status !== "DANG_PHUC_VU") {
-        throw new TxAbortError("Đơn hàng không ở trạng thái đang phục vụ", 409);
-      }
+      if (order.status !== "DANG_PHUC_VU") throw new TxAbortError("Đơn hàng không ở trạng thái đang phục vụ", 409);
       if (order.version !== input.expectedVersion) {
         throw new TxAbortError("Đơn hàng đã được cập nhật bởi phiên làm việc khác, vui lòng tải lại", 409);
       }
@@ -65,14 +60,25 @@ export async function modifyOrderItems(
             order,
             item,
             quantityToCancel: item.quantity,
-            pinCode: input.pinCode,
-            lyDo: input.lyDo,
-            actingUser,
+            approval: approval as any,
+            actingUser: actingUser!,
             clientIp,
+            userAgent,
             enqueuedJobIds,
           });
         } else {
           await tx.delete(orderItems).where(eq(orderItems.id, input.orderItemId));
+          await logAudit({
+            userId: actingUser?.userId ?? actingUser?.id ?? null,
+            username: actingUser?.username,
+            userAgent,
+            action: "REMOVE_UNSENT_ITEM",
+            entityType: "order_items",
+            entityId: item.id,
+            reason: "Xóa món chưa gửi bếp khỏi đơn hàng",
+            metadata: { orderId, menuItemId: item.menuItemId, quantity: item.quantity },
+            ipAddress: clientIp,
+          }, tx);
         }
       } else {
         const itemsToProcess =
@@ -81,18 +87,11 @@ export async function modifyOrderItems(
             : input.orderItemId !== undefined || input.menuItemId !== undefined
               ? [{ id: input.orderItemId, menuItemId: input.menuItemId, quantity: input.quantity ?? 1, notes: input.notes, toppingIds: input.toppingIds ?? [] }]
               : [];
-
-        if (itemsToProcess.length === 0) {
-          throw new TxAbortError("Thiếu thông tin món cần thêm hoặc cập nhật", 400);
-        }
+        if (itemsToProcess.length === 0) throw new TxAbortError("Thiếu thông tin món cần thêm hoặc cập nhật", 400);
 
         for (const item of itemsToProcess) {
           if (item.id) {
-            const [existing] = await tx
-              .select()
-              .from(orderItems)
-              .where(and(eq(orderItems.id, item.id), eq(orderItems.orderId, orderId)))
-              .limit(1);
+            const [existing] = await tx.select().from(orderItems).where(and(eq(orderItems.id, item.id), eq(orderItems.orderId, orderId))).limit(1);
             if (!existing) throw new TxAbortError("Dòng món không tồn tại trong đơn hàng", 404);
             if (existing.isCancelled) throw new TxAbortError("Dòng món đã bị hủy, không thể chỉnh sửa hoặc xóa", 409);
 
@@ -103,10 +102,10 @@ export async function modifyOrderItems(
                   order,
                   item: existing,
                   quantityToCancel: existing.quantity - item.quantity,
-                  pinCode: input.pinCode,
-                  lyDo: input.lyDo,
-                  actingUser,
+                  approval: approval as any,
+                  actingUser: actingUser!,
                   clientIp,
+                  userAgent,
                   enqueuedJobIds,
                 });
               } else {
@@ -114,15 +113,22 @@ export async function modifyOrderItems(
               }
             } else {
               if (item.quantity > existing.quantity) {
-                const [mItem] = await tx
-                  .select({ name: menuItems.name, status: menuItems.status })
-                  .from(menuItems)
-                  .where(eq(menuItems.id, existing.menuItemId))
-                  .limit(1);
+                const [mItem] = await tx.select({ name: menuItems.name, status: menuItems.status }).from(menuItems).where(eq(menuItems.id, existing.menuItemId)).limit(1);
                 if (mItem && mItem.status === "HET_HANG") throw new TxAbortError(formatErr07(mItem.name), 400);
               }
               if (item.quantity <= 0) {
                 await tx.delete(orderItems).where(eq(orderItems.id, item.id));
+                await logAudit({
+                  userId: actingUser?.userId ?? actingUser?.id ?? null,
+                  username: actingUser?.username,
+                  userAgent,
+                  action: "REMOVE_UNSENT_ITEM",
+                  entityType: "order_items",
+                  entityId: item.id,
+                  reason: "Giảm số lượng về 0 (xóa món chưa gửi bếp)",
+                  metadata: { orderId, menuItemId: existing.menuItemId, previousQuantity: existing.quantity },
+                  ipAddress: clientIp,
+                }, tx);
               } else {
                 const nextNotes = item.notes !== undefined ? (item.notes === null || item.notes.trim() === "" ? null : item.notes.trim().slice(0, 100)) : existing.notes;
                 await tx.update(orderItems).set({ quantity: item.quantity, notes: nextNotes }).where(eq(orderItems.id, item.id));
@@ -142,17 +148,14 @@ export async function modifyOrderItems(
               if (toppingRecords.some((t) => !t.isAvailable)) throw new TxAbortError("Topping hiện không còn hoạt động", 400);
             }
 
-            const [newItem] = await tx
-              .insert(orderItems)
-              .values({
-                orderId,
-                menuItemId: menuItem.id,
-                quantity: item.quantity > 0 ? item.quantity : 1,
-                unitPrice: menuItem.price,
-                notes: item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null,
-                isPrintedKitchen: false,
-              })
-              .returning();
+            const [newItem] = await tx.insert(orderItems).values({
+              orderId,
+              menuItemId: menuItem.id,
+              quantity: item.quantity > 0 ? item.quantity : 1,
+              unitPrice: menuItem.price,
+              notes: item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null,
+              isPrintedKitchen: false,
+            }).returning();
 
             for (const t of toppingRecords) {
               await tx.insert(orderItemToppings).values({ orderItemId: newItem.id, toppingId: t.id, toppingName: t.name, toppingPrice: t.price });
@@ -162,14 +165,13 @@ export async function modifyOrderItems(
       }
 
       const calculatedTotal = await calculateOrderTotal(orderId, tx);
-      if (calculatedTotal > MAX_ORDER_AMOUNT) {
-        throw new TxAbortError("Tổng tiền đơn hàng vượt quá giới hạn 2.000.000.000 VNĐ", 400);
-      }
+      if (calculatedTotal > MAX_ORDER_AMOUNT) throw new TxAbortError("Tổng tiền đơn hàng vượt quá giới hạn 2.000.000.000 VNĐ", 400);
 
       const { discountAmount, finalAmount } = await recalculateOrderDiscount(
         orderId,
         calculatedTotal,
         order.discountAmount,
+        order.discountPercent,
         tx,
       );
 
@@ -193,16 +195,11 @@ export async function modifyOrderItems(
     });
 
     for (const jobId of enqueuedJobIds) {
-      dispatchPrintJob(jobId).catch((err) => {
-        console.error(`Error dispatching cancel print job ${jobId}:`, err);
-      });
+      dispatchPrintJob(jobId).catch((err) => console.error(`Error dispatching cancel job ${jobId}:`, err));
     }
-
     return res;
   } catch (err: any) {
-    if (err instanceof TxAbortError) {
-      return { ok: false, error: err.message, status: err.status };
-    }
+    if (err instanceof TxAbortError) return { ok: false, error: err.message, status: err.status };
     throw err;
   }
 }

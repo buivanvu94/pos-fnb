@@ -3,7 +3,7 @@ import { requireRole } from "@/server/auth/require-role";
 import { can } from "@/lib/permissions";
 import { modifyOrderItemsSchema } from "@/server/orders/order-schema";
 import { modifyOrderItems } from "@/server/orders/order-items-service";
-import { getClientIp } from "@/server/approvals/ip-helper";
+import { getClientIp, getUserAgent } from "@/server/approvals/ip-helper";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -51,11 +51,13 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
 
   try {
     const clientIp = getClientIp(req);
+    const userAgent = getUserAgent(req);
     const result = await modifyOrderItems(
       orderId,
       parsed.data,
       auth.user,
       clientIp,
+      userAgent,
     );
 
     if (!result.ok) {
