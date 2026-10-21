@@ -3,7 +3,7 @@ import { sql } from "drizzle-orm";
 import { tables } from "./areas-tables";
 import { shifts } from "./shifts-cash";
 import { users } from "./users";
-import { menuItems } from "./menu";
+import { menuItems, toppings } from "./menu";
 
 /**
  * Orders (HoaDon) representing table orders or counter takeaway orders.
@@ -25,7 +25,7 @@ export const orders = pgTable(
     discountAmount: integer("discount_amount").notNull().default(0), // GiamGia VND
     finalAmount: integer("final_amount").notNull().default(0), // KhachCanTra VND
     paymentMethod: varchar("payment_method", { length: 20 }), // TIEN_MAT | VIETQR
-    status: varchar("status", { length: 20 }).notNull().default("DANG_PHUC_VU"), // DANG_PHUC_VU | DA_THANH_TOAN | DA_HUY
+    status: varchar("status", { length: 20 }).notNull().default("DANG_PHUC_VU"), // DANG_PHUC_VU | DA_THANH_TOAN | DA_HUY | DA_GOP
     version: integer("version").notNull().default(1), // Optimistic concurrency lock
     createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -38,7 +38,7 @@ export const orders = pgTable(
     index("orders_shift_id_idx").on(table.shiftId),
     index("orders_table_id_idx").on(table.tableId),
     check("orders_order_type_check", sql`${table.orderType} IN ('TAI_BAN', 'MANG_VE')`),
-    check("orders_status_check", sql`${table.status} IN ('DANG_PHUC_VU', 'DA_THANH_TOAN', 'DA_HUY')`),
+    check("orders_status_check", sql`${table.status} IN ('DANG_PHUC_VU', 'DA_THANH_TOAN', 'DA_HUY', 'DA_GOP')`),
     check("orders_total_amount_check", sql`${table.totalAmount} >= 0`),
     check("orders_discount_amount_check", sql`${table.discountAmount} >= 0`),
     check("orders_final_amount_check", sql`${table.finalAmount} >= 0`),
@@ -62,6 +62,7 @@ export const orderItems = pgTable(
     unitPrice: integer("unit_price").notNull(), // DonGia VND at order time
     notes: varchar("notes", { length: 100 }), // GhiChu
     isPrintedKitchen: boolean("is_printed_kitchen").notNull().default(false), // DaInBep
+    sentAt: timestamp("sent_at", { withTimezone: true }), // Thời điểm gửi bếp
     isCancelled: boolean("is_cancelled").notNull().default(false), // DaHuy
     cancelReason: varchar("cancel_reason", { length: 255 }), // LyDoHuy (min 5 chars per BR-03)
     cancelledById: integer("cancelled_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -72,6 +73,29 @@ export const orderItems = pgTable(
     index("order_items_menu_item_id_idx").on(table.menuItemId),
     check("order_items_quantity_check", sql`${table.quantity} > 0`),
     check("order_items_unit_price_check", sql`${table.unitPrice} >= 0`),
+  ],
+);
+
+/**
+ * Order item toppings: toppings selected for a specific order item.
+ */
+export const orderItemToppings = pgTable(
+  "order_item_toppings",
+  {
+    id: serial("id").primaryKey(),
+    orderItemId: integer("order_item_id")
+      .notNull()
+      .references(() => orderItems.id, { onDelete: "cascade" }),
+    toppingId: integer("topping_id")
+      .notNull()
+      .references(() => toppings.id, { onDelete: "restrict" }),
+    toppingName: varchar("topping_name", { length: 100 }).notNull(),
+    toppingPrice: integer("topping_price").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("order_item_toppings_order_item_id_idx").on(table.orderItemId),
+    check("order_item_toppings_price_check", sql`${table.toppingPrice} >= 0`),
   ],
 );
 
@@ -109,5 +133,7 @@ export type Order = typeof orders.$inferSelect;
 export type NewOrder = typeof orders.$inferInsert;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type NewOrderItem = typeof orderItems.$inferInsert;
+export type OrderItemTopping = typeof orderItemToppings.$inferSelect;
+export type NewOrderItemTopping = typeof orderItemToppings.$inferInsert;
 export type Payment = typeof payments.$inferSelect;
 export type NewPayment = typeof payments.$inferInsert;
