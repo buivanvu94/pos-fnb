@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { db } from "@/db";
-import { tables, areas } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
+import { can } from "@/lib/permissions";
+import { getTablesWithActiveOrders } from "@/server/tables/table-service";
 
 /**
  * GET /api/v1/tables
- * Returns active table list with corresponding area details.
- * Read-only endpoint accessible to all authenticated staff (FR-01).
+ * Returns active table list with corresponding area details, real-time status (TRONG, DANG_DUNG, CHO_THANH_TOAN),
+ * active order id, total money, and item count. Accessible to all authenticated staff (FR-01, SRS 2.5).
  */
 export async function GET(req: NextRequest) {
   const auth = await requireRole(req);
@@ -15,21 +14,15 @@ export async function GET(req: NextRequest) {
     return auth.response;
   }
 
-  try {
-    const tableList = await db
-      .select({
-        id: tables.id,
-        code: tables.code,
-        name: tables.name,
-        capacity: tables.capacity,
-        status: tables.status,
-        areaId: tables.areaId,
-        areaName: areas.name,
-      })
-      .from(tables)
-      .leftJoin(areas, eq(tables.areaId, areas.id))
-      .orderBy(areas.displayOrder, tables.code);
+  if (!can(auth.user.role, "VIEW_TABLES")) {
+    return NextResponse.json(
+      { ok: false, error: "Quyền truy cập bị từ chối: Không có quyền xem sơ đồ bàn" },
+      { status: 403 },
+    );
+  }
 
+  try {
+    const tableList = await getTablesWithActiveOrders();
     return NextResponse.json({
       ok: true,
       data: tableList,
