@@ -13,10 +13,10 @@ dotenv.config();
  * @param customUrl - Optional database connection string
  */
 export async function runMigrations(customUrl?: string): Promise<void> {
-  const connectionString =
-    customUrl ||
-    process.env.DATABASE_URL ||
-    "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos";
+  const connectionString = customUrl || process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL environment variable is missing for running migrations.");
+  }
 
   const pool = new Pool({ connectionString });
   const db = drizzle(pool);

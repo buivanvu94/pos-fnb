@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
+import { signAuthToken, AUTH_COOKIE_NAME, isCookieSecure } from "@/server/auth/jwt";
 import type { Role } from "@/lib/permissions";
 
 /**
@@ -11,8 +11,17 @@ import type { Role } from "@/lib/permissions";
  * Handles user authentication with username and password, returns JWT in httpOnly cookie.
  */
 export async function POST(req: NextRequest) {
+  let body: Record<string, unknown>;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: "Dữ liệu yêu cầu không hợp lệ (lỗi parse JSON)" },
+      { status: 400 },
+    );
+  }
+
+  try {
     const { username, password } = body;
 
     if (!username || !password) {
@@ -65,7 +74,7 @@ export async function POST(req: NextRequest) {
       name: AUTH_COOKIE_NAME,
       value: token,
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: isCookieSecure(),
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 7, // 7 days

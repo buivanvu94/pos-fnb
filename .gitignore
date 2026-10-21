@@ -6,3 +6,6 @@
 *.log
 uploads/
 .DS_Store
+next-env.d.ts
+backup_*.sql
+*.tsbuildinfo

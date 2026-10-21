@@ -16,7 +16,9 @@ export function formatYmdVietnam(date: Date = new Date()): string {
 
 /**
  * Generates next shift code in format CA-YYYYMMDD-nn inside a transaction.
- * Uses PostgreSQL advisory transaction lock to prevent race conditions.
+ * Uses PostgreSQL advisory transaction lock and integer MAX to avoid string order bug at 99 -> 100.
+ *
+ * // Must be executed inside a PostgreSQL transaction (tx) so pg_advisory_xact_lock is scoped and auto-releases on commit/rollback
  *
  * @param tx - Drizzle transaction or database instance
  * @param date - Date of the shift (defaults to current date)
@@ -34,29 +36,24 @@ export async function generateShiftCode(
     sql`SELECT pg_advisory_xact_lock(hashtext(${`shift_code_${ymd}`}))`,
   );
 
-  const result = await tx.execute<{ shift_code: string }>(
-    sql`SELECT shift_code FROM shifts 
-        WHERE shift_code LIKE ${prefix + "%"} 
-        ORDER BY shift_code DESC LIMIT 1`,
+  // Cast suffix to integer and take MAX to prevent string sorting bugs (e.g. '99' > '100')
+  const result = await tx.execute<{ max_seq: number | string }>(
+    sql`SELECT COALESCE(MAX(CAST(SPLIT_PART(shift_code, '-', 3) AS integer)), 0) AS max_seq
+        FROM shifts
+        WHERE shift_code LIKE ${prefix + "%"}`,
   );
 
-  let nextSequence = 1;
-  if (result.rows.length > 0 && result.rows[0]?.shift_code) {
-    const latestCode = result.rows[0].shift_code;
-    const parts = latestCode.split("-");
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (!isNaN(lastNum)) {
-      nextSequence = lastNum + 1;
-    }
-  }
-
+  const maxSeq = Number(result.rows[0]?.max_seq ?? 0);
+  const nextSequence = maxSeq + 1;
   const paddedSequence = String(nextSequence).padStart(2, "0");
   return `${prefix}${paddedSequence}`;
 }
 
 /**
  * Generates next order code in format HD-YYYYMMDD-nnnn inside a transaction.
- * Uses PostgreSQL advisory transaction lock to prevent race conditions.
+ * Uses PostgreSQL advisory transaction lock and integer MAX to avoid string order bug at 9999 -> 10000.
+ *
+ * // Must be executed inside a PostgreSQL transaction (tx) so pg_advisory_xact_lock is scoped and auto-releases on commit/rollback
  *
  * @param tx - Drizzle transaction or database instance
  * @param date - Date of the order (defaults to current date)
@@ -74,22 +71,15 @@ export async function generateOrderCode(
     sql`SELECT pg_advisory_xact_lock(hashtext(${`order_code_${ymd}`}))`,
   );
 
-  const result = await tx.execute<{ order_code: string }>(
-    sql`SELECT order_code FROM orders 
-        WHERE order_code LIKE ${prefix + "%"} 
-        ORDER BY order_code DESC LIMIT 1`,
+  // Cast suffix to integer and take MAX to prevent string sorting bugs
+  const result = await tx.execute<{ max_seq: number | string }>(
+    sql`SELECT COALESCE(MAX(CAST(SPLIT_PART(order_code, '-', 3) AS integer)), 0) AS max_seq
+        FROM orders
+        WHERE order_code LIKE ${prefix + "%"}`,
   );
 
-  let nextSequence = 1;
-  if (result.rows.length > 0 && result.rows[0]?.order_code) {
-    const latestCode = result.rows[0].order_code;
-    const parts = latestCode.split("-");
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (!isNaN(lastNum)) {
-      nextSequence = lastNum + 1;
-    }
-  }
-
+  const maxSeq = Number(result.rows[0]?.max_seq ?? 0);
+  const nextSequence = maxSeq + 1;
   const paddedSequence = String(nextSequence).padStart(4, "0");
   return `${prefix}${paddedSequence}`;
 }

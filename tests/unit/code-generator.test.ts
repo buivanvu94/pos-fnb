@@ -38,7 +38,6 @@ describe("Transaction-based Sequential Code Generator", () => {
       const code1 = await generateShiftCode(tx, date);
       expect(code1).toMatch(new RegExp(`^CA-${ymd}-\\d{2}$`));
 
-      // Insert dummy shift to check sequence progression
       await tx.insert(schema.shifts).values({
         shiftCode: code1,
         cashierId: 1,
@@ -53,7 +52,45 @@ describe("Transaction-based Sequential Code Generator", () => {
       const num2 = parseInt(code2.split("-")[2], 10);
       expect(num2).toBe(num1 + 1);
 
-      // Rollback dummy insert by throwing a silent error or test within sub-transaction
+      throw new Error("__ROLLBACK_TEST_TX__");
+    }).catch((err) => {
+      if (err.message !== "__ROLLBACK_TEST_TX__") throw err;
+    });
+  });
+
+  it("correctly advances sequence past 99 to 100 without string sorting bugs", async () => {
+    const date = new Date("2026-10-22T05:00:00Z");
+    const ymd = formatYmdVietnam(date);
+
+    await testDb.transaction(async (tx) => {
+      // Seed a shift with sequence 99
+      const [insertedShift] = await tx
+        .insert(schema.shifts)
+        .values({
+          shiftCode: `CA-${ymd}-99`,
+          cashierId: 1,
+          initialCash: 500000,
+          status: "DA_DONG",
+        })
+        .returning({ id: schema.shifts.id });
+
+      // The next sequence must be 100 (not 10, not 01)
+      const nextCode = await generateShiftCode(tx, date);
+      expect(nextCode).toBe(`CA-${ymd}-100`);
+
+      // Seed an order with sequence 99
+      await tx.insert(schema.orders).values({
+        orderCode: `HD-${ymd}-0099`,
+        orderType: "MANG_VE",
+        shiftId: insertedShift.id,
+        totalAmount: 50000,
+        finalAmount: 50000,
+        status: "DA_THANH_TOAN",
+      });
+
+      const nextOrderCode = await generateOrderCode(tx, date);
+      expect(nextOrderCode).toBe(`HD-${ymd}-0100`);
+
       throw new Error("__ROLLBACK_TEST_TX__");
     }).catch((err) => {
       if (err.message !== "__ROLLBACK_TEST_TX__") throw err;
@@ -68,7 +105,6 @@ describe("Transaction-based Sequential Code Generator", () => {
       const code1 = await generateOrderCode(tx, date);
       expect(code1).toMatch(new RegExp(`^HD-${ymd}-\\d{4}$`));
 
-      // Rollback
       throw new Error("__ROLLBACK_TEST_TX__");
     }).catch((err) => {
       if (err.message !== "__ROLLBACK_TEST_TX__") throw err;

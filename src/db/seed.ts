@@ -3,27 +3,54 @@ import { Pool } from "pg";
 import bcrypt from "bcryptjs";
 import * as dotenv from "dotenv";
 import * as schema from "./schema";
+import {
+  initialAreas,
+  initialTableTemplates,
+  initialCategories,
+  initialMenuItemTemplates,
+  initialSettings,
+} from "./seed-data";
 
 dotenv.config();
 
 /**
- * Idempotent seed function populating users, areas, tables, categories and menu items.
- * Can be run repeatedly without duplicating data or throwing conflict errors.
+ * Idempotent seed function.
+ * Refuses to run in production unless explicit --force flag is passed.
+ * Does NOT overwrite existing user passwords, PINs, or roles.
  */
-export async function runSeed(customUrl?: string): Promise<void> {
-  const connectionString =
-    customUrl ||
-    process.env.DATABASE_URL ||
-    "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos";
+export async function runSeed(customUrl?: string, force = false): Promise<void> {
+  const isProduction = process.env.NODE_ENV === "production";
+  const hasForceFlag = force || process.argv.includes("--force");
+
+  if (isProduction && !hasForceFlag) {
+    throw new Error(
+      "Refusing to execute seed in production without explicit --force flag.",
+    );
+  }
+
+  const connectionString = customUrl || process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error("DATABASE_URL environment variable is missing for running seed.");
+  }
+
+  const seedPassword =
+    process.env.SEED_ADMIN_PASSWORD || (isProduction ? "" : "123456");
+  const seedPin = process.env.SEED_ADMIN_PIN || (isProduction ? "" : "1234");
+
+  if (isProduction && (!seedPassword || !seedPin)) {
+    throw new Error(
+      "SEED_ADMIN_PASSWORD and SEED_ADMIN_PIN must be supplied in production.",
+    );
+  }
 
   const pool = new Pool({ connectionString });
   const db = drizzle(pool, { schema });
 
-  console.log("Seeding initial data...");
+  console.log("Seeding data (idempotent)...");
 
-  // 1. Seed Users (1 Quan ly, 1 Thu ngan, 1 Phuc vu)
-  const defaultPasswordHash = await bcrypt.hash("123456", 10);
-  const managerPinHash = await bcrypt.hash("1234", 10);
+  // 1. Seed Users (Do NOT overwrite existing credentials or roles)
+  const defaultPasswordHash = await bcrypt.hash(seedPassword, 10);
+  const managerPinHash = await bcrypt.hash(seedPin, 10);
 
   const initialUsers: schema.NewUser[] = [
     {
@@ -51,24 +78,10 @@ export async function runSeed(customUrl?: string): Promise<void> {
     await db
       .insert(schema.users)
       .values(u)
-      .onConflictDoUpdate({
-        target: schema.users.username,
-        set: {
-          fullName: u.fullName,
-          role: u.role,
-          passwordHash: u.passwordHash,
-          pinHash: u.pinHash,
-        },
-      });
+      .onConflictDoNothing({ target: schema.users.username });
   }
 
-  // 2. Seed Areas (Khu vuc mau)
-  const initialAreas: schema.NewArea[] = [
-    { code: "KV-T1", name: "Tầng 1 (Trong nhà)", displayOrder: 1 },
-    { code: "KV-T2", name: "Tầng 2 (Máy lạnh)", displayOrder: 2 },
-    { code: "KV-SV", name: "Sân vườn", displayOrder: 3 },
-  ];
-
+  // 2. Seed Areas
   for (const a of initialAreas) {
     await db
       .insert(schema.areas)
@@ -82,39 +95,26 @@ export async function runSeed(customUrl?: string): Promise<void> {
   const seededAreas = await db.select().from(schema.areas);
   const areaMap = new Map(seededAreas.map((a) => [a.code, a.id]));
 
-  // 3. Seed Tables (Ban mau)
-  const t1Id = areaMap.get("KV-T1")!;
-  const t2Id = areaMap.get("KV-T2")!;
-  const svId = areaMap.get("KV-SV")!;
-
-  const initialTables: schema.NewTable[] = [
-    { code: "BAN-01", name: "Bàn 01", areaId: t1Id, capacity: 4, status: "TRONG" },
-    { code: "BAN-02", name: "Bàn 02", areaId: t1Id, capacity: 4, status: "TRONG" },
-    { code: "BAN-03", name: "Bàn 03", areaId: t1Id, capacity: 4, status: "TRONG" },
-    { code: "BAN-04", name: "Bàn 04", areaId: t1Id, capacity: 4, status: "TRONG" },
-    { code: "BAN-05", name: "Bàn 05", areaId: t2Id, capacity: 4, status: "TRONG" },
-    { code: "BAN-06", name: "Bàn 06", areaId: t2Id, capacity: 6, status: "TRONG" },
-    { code: "BAN-07", name: "Bàn 07", areaId: t2Id, capacity: 6, status: "TRONG" },
-    { code: "BAN-08", name: "Bàn 08", areaId: svId, capacity: 8, status: "TRONG" },
-  ];
-
-  for (const t of initialTables) {
+  // 3. Seed Tables
+  for (const t of initialTableTemplates) {
+    const areaId = areaMap.get(t.areaCode);
+    if (!areaId) continue;
     await db
       .insert(schema.tables)
-      .values(t)
+      .values({
+        code: t.code,
+        name: t.name,
+        areaId,
+        capacity: t.capacity,
+        status: t.status,
+      })
       .onConflictDoUpdate({
         target: schema.tables.code,
-        set: { name: t.name, areaId: t.areaId, capacity: t.capacity },
+        set: { name: t.name, areaId, capacity: t.capacity },
       });
   }
 
-  // 4. Seed Categories & Menu Items
-  const initialCategories: schema.NewCategory[] = [
-    { code: "CAT-CF", name: "Cà phê", displayOrder: 1 },
-    { code: "CAT-TRA", name: "Trà & Trà sữa", displayOrder: 2 },
-    { code: "CAT-AN", name: "Món ăn nhẹ", displayOrder: 3 },
-  ];
-
+  // 4. Seed Categories
   for (const c of initialCategories) {
     await db
       .insert(schema.categories)
@@ -128,49 +128,21 @@ export async function runSeed(customUrl?: string): Promise<void> {
   const seededCats = await db.select().from(schema.categories);
   const catMap = new Map(seededCats.map((c) => [c.code, c.id]));
 
-  const initialItems: schema.NewMenuItem[] = [
-    {
-      code: "CF-DEN",
-      name: "Cà phê đen đá",
-      categoryId: catMap.get("CAT-CF")!,
-      price: 25000,
-      unit: "Ly",
-      status: "DANG_BAN",
-      targetPrinter: "BAR",
-    },
-    {
-      code: "CF-SUA",
-      name: "Cà phê sữa đá",
-      categoryId: catMap.get("CAT-CF")!,
-      price: 29000,
-      unit: "Ly",
-      status: "DANG_BAN",
-      targetPrinter: "BAR",
-    },
-    {
-      code: "TRA-DAO",
-      name: "Trà đào cam sả",
-      categoryId: catMap.get("CAT-TRA")!,
-      price: 35000,
-      unit: "Ly",
-      status: "DANG_BAN",
-      targetPrinter: "BAR",
-    },
-    {
-      code: "BANH-MI",
-      name: "Bánh mì chảo",
-      categoryId: catMap.get("CAT-AN")!,
-      price: 45000,
-      unit: "Phần",
-      status: "DANG_BAN",
-      targetPrinter: "KITCHEN",
-    },
-  ];
-
-  for (const item of initialItems) {
+  // 5. Seed Menu Items
+  for (const item of initialMenuItemTemplates) {
+    const categoryId = catMap.get(item.categoryCode);
+    if (!categoryId) continue;
     await db
       .insert(schema.menuItems)
-      .values(item)
+      .values({
+        code: item.code,
+        name: item.name,
+        categoryId,
+        price: item.price,
+        unit: item.unit,
+        status: item.status,
+        targetPrinter: item.targetPrinter,
+      })
       .onConflictDoUpdate({
         target: schema.menuItems.code,
         set: {
@@ -183,13 +155,7 @@ export async function runSeed(customUrl?: string): Promise<void> {
       });
   }
 
-  // 5. Seed Settings
-  const initialSettings: schema.NewSetting[] = [
-    { key: "STORE_NAME", value: "POS F&B Quán Việt", description: "Tên quán hiển thị" },
-    { key: "STORE_ADDRESS", value: "123 Đường Ẩm Thực, Quận 1, TP. HCM", description: "Địa chỉ quán" },
-    { key: "STORE_PHONE", value: "0901234567", description: "Số điện thoại hotline" },
-  ];
-
+  // 6. Seed Settings
   for (const s of initialSettings) {
     await db
       .insert(schema.settings)
@@ -204,7 +170,6 @@ export async function runSeed(customUrl?: string): Promise<void> {
   console.log("Seeding finished successfully.");
 }
 
-// Direct execution via `npm run db:seed`
 if (process.argv[1] && process.argv[1].endsWith("seed.ts")) {
   runSeed()
     .then(() => process.exit(0))

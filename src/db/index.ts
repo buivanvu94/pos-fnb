@@ -2,12 +2,23 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as schema from "./schema";
 
-const connectionString =
-  process.env.DATABASE_URL || "postgres://pos:pos_dev_pw@127.0.0.1:15450/pos";
-
 /**
- * Singleton database pool connection for PostgreSQL.
+ * Returns the PostgreSQL connection string.
+ * Strictly throws if DATABASE_URL is not defined, without hardcoded fallback credentials.
  */
+function getDatabaseUrl(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("DATABASE_URL environment variable is strictly required in production");
+    }
+    throw new Error(
+      "DATABASE_URL environment variable is missing. Please configure it in .env file.",
+    );
+  }
+  return url;
+}
+
 const globalForDb = globalThis as unknown as {
   posPool: Pool | undefined;
 };
@@ -15,7 +26,7 @@ const globalForDb = globalThis as unknown as {
 export const pool =
   globalForDb.posPool ??
   new Pool({
-    connectionString,
+    connectionString: getDatabaseUrl(),
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,

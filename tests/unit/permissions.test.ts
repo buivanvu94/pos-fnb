@@ -5,8 +5,6 @@ import {
   PERMISSION_MATRIX,
   getPermissionRule,
   requiresManagerPin,
-  type Role,
-  type PermissionAction,
 } from "@/lib/permissions";
 
 describe("Permissions Matrix - BA/SRS Section 2.5 (17 Rows)", () => {
@@ -108,6 +106,8 @@ describe("Permissions Matrix - BA/SRS Section 2.5 (17 Rows)", () => {
   // Row 11: Mở ca làm việc (Nhập tiền lẻ) (FR-06)
   it("Row 11: OPEN_SHIFT -> QUAN_LY: Có, THU_NGAN: Của mình, PHUC_VU: Không", () => {
     expect(can("QUAN_LY", "OPEN_SHIFT")).toBe(true);
+    expect(can("THU_NGAN", "OPEN_SHIFT")).toBe(false); // Fail-closed when context missing
+    expect(can("THU_NGAN", "OPEN_SHIFT", {})).toBe(false);
     expect(can("THU_NGAN", "OPEN_SHIFT", { isSelf: true })).toBe(true);
     expect(can("THU_NGAN", "OPEN_SHIFT", { isSelf: false })).toBe(false);
     expect(can("PHUC_VU", "OPEN_SHIFT")).toBe(false);
@@ -116,6 +116,8 @@ describe("Permissions Matrix - BA/SRS Section 2.5 (17 Rows)", () => {
   // Row 12: Ghi nhận thu/chi vặt tiền mặt trong ca (FR-07)
   it("Row 12: RECORD_CASH_TRANSACTION -> QUAN_LY: Có, THU_NGAN: Của mình, PHUC_VU: Không", () => {
     expect(can("QUAN_LY", "RECORD_CASH_TRANSACTION")).toBe(true);
+    expect(can("THU_NGAN", "RECORD_CASH_TRANSACTION")).toBe(false); // Fail-closed
+    expect(can("THU_NGAN", "RECORD_CASH_TRANSACTION", {})).toBe(false);
     expect(can("THU_NGAN", "RECORD_CASH_TRANSACTION", { isSelf: true })).toBe(true);
     expect(can("THU_NGAN", "RECORD_CASH_TRANSACTION", { isSelf: false })).toBe(false);
     expect(can("PHUC_VU", "RECORD_CASH_TRANSACTION")).toBe(false);
@@ -124,6 +126,8 @@ describe("Permissions Matrix - BA/SRS Section 2.5 (17 Rows)", () => {
   // Row 13: Kết ca kiểm đếm tiền thực tế (FR-08)
   it("Row 13: CLOSE_SHIFT_COUNT_CASH -> QUAN_LY: Có, THU_NGAN: Của mình, PHUC_VU: Không", () => {
     expect(can("QUAN_LY", "CLOSE_SHIFT_COUNT_CASH")).toBe(true);
+    expect(can("THU_NGAN", "CLOSE_SHIFT_COUNT_CASH")).toBe(false); // Fail-closed
+    expect(can("THU_NGAN", "CLOSE_SHIFT_COUNT_CASH", {})).toBe(false);
     expect(can("THU_NGAN", "CLOSE_SHIFT_COUNT_CASH", { isSelf: true })).toBe(true);
     expect(can("THU_NGAN", "CLOSE_SHIFT_COUNT_CASH", { isSelf: false })).toBe(false);
     expect(can("PHUC_VU", "CLOSE_SHIFT_COUNT_CASH")).toBe(false);
@@ -146,6 +150,8 @@ describe("Permissions Matrix - BA/SRS Section 2.5 (17 Rows)", () => {
   // Row 16: Xem doanh thu trong ca của chính mình (FR-14)
   it("Row 16: VIEW_OWN_SHIFT_REVENUE -> QUAN_LY: Có, THU_NGAN: Của mình, PHUC_VU: Không", () => {
     expect(can("QUAN_LY", "VIEW_OWN_SHIFT_REVENUE")).toBe(true);
+    expect(can("THU_NGAN", "VIEW_OWN_SHIFT_REVENUE")).toBe(false); // Fail-closed
+    expect(can("THU_NGAN", "VIEW_OWN_SHIFT_REVENUE", {})).toBe(false);
     expect(can("THU_NGAN", "VIEW_OWN_SHIFT_REVENUE", { isSelf: true })).toBe(true);
     expect(can("THU_NGAN", "VIEW_OWN_SHIFT_REVENUE", { isSelf: false })).toBe(false);
     expect(can("PHUC_VU", "VIEW_OWN_SHIFT_REVENUE")).toBe(false);

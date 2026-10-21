@@ -2,43 +2,60 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 
 /**
+ * Regex matching static asset file extensions.
+ * Do NOT use pathname.includes(".") as that would unintentionally bypass paths like /admin.test
+ */
+const STATIC_FILE_REGEX = /\.(ico|png|jpg|jpeg|svg|css|js|map|woff|woff2|webp|ttf)$/i;
+
+/**
  * Next.js Middleware implementing role-based route protection.
- * - Protects /admin/* and /api/v1/admin/* for role 'QUAN_LY' only (returns 403 for other roles).
- * - Protects authenticated routes (/tables, /counter, /payment, /shifts).
- * - Redirects logged-in users away from /login to main screen.
+ * - Strips all client-supplied x-user-* headers to prevent spoofing.
+ * - Protects /admin/* and /api/v1/admin/* strictly for role 'QUAN_LY' (403 for other roles).
+ * - Leaves /api/v1/reports/revenue to handler-level check via can().
+ * - Protects authenticated routes and redirects logged-in users away from /login.
  */
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
   const isAuthRoute = pathname === "/login" || pathname.startsWith("/api/v1/auth/login");
 
-  // Skip static resources and Next internals
+  // 1. Skip static assets and Next.js internal files
   if (
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon.ico") ||
-    pathname.includes(".")
+    pathname === "/favicon.ico" ||
+    STATIC_FILE_REGEX.test(pathname)
   ) {
     return NextResponse.next();
+  }
+
+  // 2. Strip any spoofed x-user-* headers sent from client
+  const requestHeaders = new Headers(req.headers);
+  for (const key of Array.from(requestHeaders.keys())) {
+    if (key.toLowerCase().startsWith("x-user-")) {
+      requestHeaders.delete(key);
+    }
   }
 
   const token = req.cookies.get(AUTH_COOKIE_NAME)?.value;
   const user = token ? await verifyAuthToken(token) : null;
 
-  // 1. Logged in users visiting /login get redirected to /tables
+  // 3. Logged in users visiting /login get redirected to /tables
   if (user && pathname === "/login") {
     return NextResponse.redirect(new URL("/tables", req.url));
   }
 
-  // 2. Allow public auth route
+  // 4. Allow public authentication endpoints
   if (isAuthRoute) {
-    return NextResponse.next();
+    return NextResponse.next({
+      request: { headers: requestHeaders },
+    });
   }
 
-  // 3. Unauthenticated access to protected routes
+  // 5. Unauthenticated access to protected routes
   if (!user) {
     if (isApi) {
       return NextResponse.json(
-        { ok: false, error: "Yêu cầu đăng nhập để truy cập tài nguyên này" },
+        { ok: false, error: "Yêu cầu đăng nhập để truy cập tài nguyên này (401)" },
         { status: 401 },
       );
     }
@@ -47,11 +64,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 4. Role-based protection: Admin and general reports strictly require 'QUAN_LY'
-  const isAdminRoute =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/api/v1/admin") ||
-    pathname.startsWith("/api/v1/reports/revenue");
+  // 6. Role-based protection: Admin management routes strictly require 'QUAN_LY'
+  // Note: /api/v1/reports/revenue is handled at route handler level using can()
+  const isAdminRoute = pathname.startsWith("/admin") || pathname.startsWith("/api/v1/admin");
 
   if (isAdminRoute && user.role !== "QUAN_LY") {
     if (isApi) {
@@ -63,15 +78,13 @@ export async function middleware(req: NextRequest) {
         { status: 403 },
       );
     }
-    // For page routes, redirect to a 403 forbidden page or tables with error
     return new NextResponse("403 Forbidden: Quyền truy cập bị từ chối", {
       status: 403,
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   }
 
-  // 5. Pass authenticated user context via request headers
-  const requestHeaders = new Headers(req.headers);
+  // 7. Inject securely verified user context headers for downstream server components
   requestHeaders.set("x-user-id", String(user.userId));
   requestHeaders.set("x-user-role", user.role);
   requestHeaders.set("x-user-name", encodeURIComponent(user.fullName));

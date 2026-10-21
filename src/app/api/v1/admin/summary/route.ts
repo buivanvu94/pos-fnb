@@ -1,22 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/server/auth/require-role";
 
 /**
  * GET /api/v1/admin/summary
- * Sample admin endpoint protected by middleware requiring QUAN_LY role.
+ * Sample admin endpoint protected by requireRole directly verifying the auth cookie.
  */
 export async function GET(req: NextRequest) {
-  const role = req.headers.get("x-user-role");
-
-  if (role !== "QUAN_LY") {
-    return NextResponse.json(
-      { ok: false, error: "Quyền truy cập bị từ chối: Yêu cầu vai trò Quản lý" },
-      { status: 403 },
-    );
+  const auth = await requireRole(req, "QUAN_LY");
+  if (!auth.authorized) {
+    return auth.response;
   }
 
   return NextResponse.json({
     ok: true,
     message: "Admin dashboard access granted",
-    data: { system: "POS F&B", status: "ONLINE" },
+    data: { system: "POS F&B", status: "ONLINE", admin: auth.user.username },
   });
 }

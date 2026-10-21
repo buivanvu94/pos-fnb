@@ -84,7 +84,8 @@ export function can(
     return Boolean(context.hasManagerPin);
   }
   if (rule === "CUA_MINH") {
-    return context.isSelf === undefined ? true : Boolean(context.isSelf);
+    // Fail-closed: only permitted when context.isSelf is explicitly true
+    return context.isSelf === true;
   }
   return false;
 }

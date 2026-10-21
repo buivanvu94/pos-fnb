@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Row, Col, Card, Badge, Typography, Tag, Space, Spin } from "antd";
+import { Row, Col, Card, Badge, Typography, Tag, Space, Spin, Empty, Alert } from "antd";
 import { MainLayout } from "@/components/main-layout";
 import { TABLE_STATUS_COLORS } from "@/theme/theme-config";
 
@@ -13,27 +13,43 @@ interface TableItem {
   name: string;
   capacity: number;
   status: "TRONG" | "DANG_DUNG" | "CHO_THANH_TOAN";
+  areaId: number;
+  areaName: string | null;
 }
 
 export default function TablesPage() {
   const [tablesList, setTablesList] = useState<TableItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Simulated table list for Phase 01 foundation verification
-    const sampleTables: TableItem[] = [
-      { id: 1, code: "BAN-01", name: "Bàn 01", capacity: 4, status: "TRONG" },
-      { id: 2, code: "BAN-02", name: "Bàn 02", capacity: 4, status: "DANG_DUNG" },
-      { id: 3, code: "BAN-03", name: "Bàn 03", capacity: 4, status: "CHO_THANH_TOAN" },
-      { id: 4, code: "BAN-04", name: "Bàn 04", capacity: 4, status: "TRONG" },
-      { id: 5, code: "BAN-05", name: "Bàn 05", capacity: 6, status: "TRONG" },
-      { id: 6, code: "BAN-06", name: "Bàn 06", capacity: 6, status: "DANG_DUNG" },
-    ];
-    setTablesList(sampleTables);
-    setLoading(false);
+    fetch("/api/v1/tables")
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        if (data?.ok && Array.isArray(data.data)) {
+          setTablesList(data.data);
+        } else {
+          setTablesList([]);
+        }
+      })
+      .catch((err) => {
+        setFetchError("Không thể tải danh sách bàn từ máy chủ");
+        console.error("Error loading tables:", err);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   }, []);
 
-  const statusLabelMap = {
+  const statusLabelMap: Record<
+    "TRONG" | "DANG_DUNG" | "CHO_THANH_TOAN",
+    { label: string; color: string }
+  > = {
     TRONG: { label: "Bàn trống", color: TABLE_STATUS_COLORS.TRONG },
     DANG_DUNG: { label: "Đang phục vụ", color: TABLE_STATUS_COLORS.DANG_DUNG },
     CHO_THANH_TOAN: { label: "Chờ thanh toán", color: TABLE_STATUS_COLORS.CHO_THANH_TOAN },
@@ -56,35 +72,54 @@ export default function TablesPage() {
         </Space>
       </div>
 
+      {fetchError && (
+        <Alert
+          message={fetchError}
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       {loading ? (
-        <div style={{ textAlign: "center", padding: 50 }}>
+        <div style={{ textAlign: "center", padding: 60 }}>
           <Spin size="large" />
         </div>
+      ) : tablesList.length === 0 ? (
+        <Card style={{ borderRadius: 8, padding: 32 }}>
+          <Empty description="Chưa có dữ liệu bàn nào trong hệ thống" />
+        </Card>
       ) : (
         <Row gutter={[16, 16]}>
-          {tablesList.map((t) => (
-            <Col xs={12} sm={8} md={6} lg={4} key={t.id}>
-              <Card
-                hoverable
-                style={{
-                  borderTop: `4px solid ${statusLabelMap[t.status].color}`,
-                  textAlign: "center",
-                  borderRadius: 8,
-                }}
-              >
-                <Title level={4} style={{ marginBottom: 4 }}>
-                  {t.name}
-                </Title>
-                <Text type="secondary" style={{ display: "block", marginBottom: 8 }}>
-                  Sức chứa: {t.capacity} người
-                </Text>
-                <Badge
-                  color={statusLabelMap[t.status].color}
-                  text={<span style={{ fontWeight: 600 }}>{statusLabelMap[t.status].label}</span>}
-                />
-              </Card>
-            </Col>
-          ))}
+          {tablesList.map((t) => {
+            const statusConfig = statusLabelMap[t.status] ?? statusLabelMap.TRONG;
+            return (
+              <Col xs={12} sm={8} md={6} lg={4} key={t.id}>
+                <Card
+                  hoverable
+                  style={{
+                    borderTop: `4px solid ${statusConfig.color}`,
+                    textAlign: "center",
+                    borderRadius: 8,
+                  }}
+                >
+                  <Title level={4} style={{ marginBottom: 4 }}>
+                    {t.name}
+                  </Title>
+                  <Text type="secondary" style={{ display: "block", fontSize: 12, marginBottom: 4 }}>
+                    {t.areaName ?? "Chưa phân khu"}
+                  </Text>
+                  <Text type="secondary" style={{ display: "block", marginBottom: 8, fontSize: 13 }}>
+                    Sức chứa: {t.capacity} người
+                  </Text>
+                  <Badge
+                    color={statusConfig.color}
+                    text={<span style={{ fontWeight: 600 }}>{statusConfig.label}</span>}
+                  />
+                </Card>
+              </Col>
+            );
+          })}
         </Row>
       )}
     </MainLayout>

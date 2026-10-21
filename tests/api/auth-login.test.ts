@@ -108,4 +108,18 @@ describe("Auth Login API - POST /api/v1/auth/login", () => {
     const res = await loginHandler(req);
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 when request body contains invalid malformed JSON", async () => {
+    const req = new NextRequest("http://localhost:3000/api/v1/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "INVALID_MALFORMED_JSON",
+    });
+
+    const res = await loginHandler(req);
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.ok).toBe(false);
+    expect(data.error).toContain("lỗi parse JSON");
+  });
 });
