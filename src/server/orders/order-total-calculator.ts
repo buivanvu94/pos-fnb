@@ -1,10 +1,11 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { orderItems, orderItemToppings } from "@/db/schema";
+import type { DbOrTx } from "@/server/tables/table-service";
 
 /**
  * Calculates the total amount for all active items and toppings in an order.
  */
-export async function calculateOrderTotal(orderId: number, tx: any): Promise<number> {
+export async function calculateOrderTotal(orderId: number, tx: DbOrTx): Promise<number> {
   const activeItems = await tx
     .select({
       id: orderItems.id,

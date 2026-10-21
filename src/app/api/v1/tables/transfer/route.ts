@@ -9,6 +9,7 @@ import { transferOrMergeTable } from "@/server/orders/transfer-service";
  * Transfers active order to an empty table or merges multiple active tables into one (FR-04, BR-02, UC-03).
  */
 export async function POST(req: NextRequest) {
+  // Permission verified via requireRole/can; table orders are already bound to their active shift
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;

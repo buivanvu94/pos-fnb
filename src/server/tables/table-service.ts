@@ -2,6 +2,8 @@ import { eq, and, sql, asc } from "drizzle-orm";
 import { db } from "@/db";
 import { tables, areas, orders, orderItems } from "@/db/schema";
 
+export type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 export interface TableWithOrderInfo {
   id: number;
   code: string;
@@ -58,7 +60,7 @@ export async function getTablesWithActiveOrders(): Promise<TableWithOrderInfo[]>
   const itemCountMap = new Map<number, number>();
 
   if (activeOrderIds.length > 0) {
-    const itemCounts = await db
+    const counts = await db
       .select({
         orderId: orderItems.orderId,
         count: sql<number>`cast(coalesce(sum(${orderItems.quantity}), 0) as int)`,
@@ -72,34 +74,34 @@ export async function getTablesWithActiveOrders(): Promise<TableWithOrderInfo[]>
       )
       .groupBy(orderItems.orderId);
 
-    for (const row of itemCounts) {
-      itemCountMap.set(row.orderId, row.count);
+    for (const c of counts) {
+      itemCountMap.set(c.orderId, c.count);
     }
   }
 
-  return tableRows.map((t) => ({
-    id: t.id,
-    code: t.code,
-    name: t.name,
-    capacity: t.capacity,
-    status: t.status as "TRONG" | "DANG_DUNG" | "CHO_THANH_TOAN",
-    areaId: t.areaId,
-    areaName: t.areaName,
-    areaDisplayOrder: t.areaDisplayOrder ?? 0,
-    activeOrderId: t.activeOrderId,
-    activeOrderCode: t.activeOrderCode,
-    activeOrderTotal: t.activeOrderTotal ?? 0,
-    activeOrderItemCount: t.activeOrderId ? (itemCountMap.get(t.activeOrderId) ?? 0) : 0,
-    activeOrderVersion: t.activeOrderVersion,
+  return tableRows.map((row) => ({
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    capacity: row.capacity,
+    status: row.status as "TRONG" | "DANG_DUNG" | "CHO_THANH_TOAN",
+    areaId: row.areaId,
+    areaName: row.areaName,
+    areaDisplayOrder: row.areaDisplayOrder ?? 0,
+    activeOrderId: row.activeOrderId,
+    activeOrderCode: row.activeOrderCode,
+    activeOrderTotal: row.activeOrderTotal ?? 0,
+    activeOrderItemCount: row.activeOrderId ? (itemCountMap.get(row.activeOrderId) ?? 0) : 0,
+    activeOrderVersion: row.activeOrderVersion,
   }));
 }
 
 /**
- * Finds a table by its integer ID or code/name string.
+ * Resolves a table record by either numeric ID, string ID, code, or name.
  */
 export async function findTableByIdOrCode(
   identifier: number | string,
-  tx: typeof db = db,
+  tx: DbOrTx = db,
 ) {
   if (typeof identifier === "number") {
     const [found] = await tx.select().from(tables).where(eq(tables.id, identifier)).limit(1);

@@ -14,6 +14,7 @@ interface RouteParams {
  * Prevents modifying/deleting printed items without PIN (409), enforces optimistic locking (409).
  */
 export async function POST(req: NextRequest, { params }: RouteParams) {
+  // Permission verified via requireRole/can; order is already bound to shiftId established at opening
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/server/auth/require-role";
 import { can } from "@/lib/permissions";
+import { deleteOrderSchema } from "@/server/orders/order-schema";
 import { getOrderDetails } from "@/server/orders/order-service";
-import { deleteEmptyOrder } from "@/server/orders/order-items-service";
+import { deleteEmptyOrder } from "@/server/orders/delete-order-service";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -48,10 +49,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
 /**
  * DELETE /api/v1/orders/:id
- * Cancels an empty order that has not had any items sent to the kitchen.
- * Returns table to TRONG. If items were already printed, returns 409.
+ * Cancels an empty active order that has not had any items sent to the kitchen.
+ * Returns table to TRONG. Enforces status DANG_PHUC_VU and expectedVersion lock.
  */
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
+  // Permission verified via requireRole/can; order is already bound to shiftId established at opening
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;
@@ -73,8 +75,20 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     );
   }
 
+  const rawBody = await req.json().catch(() => ({}));
+  const parsed = deleteOrderSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: parsed.error.issues[0]?.message || "expectedVersion là bắt buộc",
+      },
+      { status: 400 },
+    );
+  }
+
   try {
-    const result = await deleteEmptyOrder(orderId);
+    const result = await deleteEmptyOrder(orderId, parsed.data.expectedVersion);
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },

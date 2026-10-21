@@ -23,6 +23,7 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
   let emptyTableId: number;
   let testShiftId: number;
   let testUserId: number;
+  let waiterUserId: number;
   let testOrderId: number;
   let emptyOrderId: number;
 
@@ -39,7 +40,13 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
       .returning();
     testUserId = user.id;
 
-    waiterToken = await signAuthToken({ userId: 993, username: `w_${tag}`, fullName: "Phục Vụ", role: "PHUC_VU" });
+    const [waiter] = await db
+      .insert(schema.users)
+      .values({ username: `w_${tag}`, passwordHash: "dummy", fullName: "Phục Vụ", role: "PHUC_VU" })
+      .returning();
+    waiterUserId = waiter.id;
+
+    waiterToken = await signAuthToken({ userId: waiter.id, username: waiter.username, fullName: waiter.fullName, role: "PHUC_VU" });
 
     const [area] = await db
       .insert(schema.areas)
@@ -148,15 +155,43 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
       if (kitchenItemId && barItemId) {
         await db.delete(schema.menuItems).where(inArray(schema.menuItems.id, [kitchenItemId, barItemId]));
       }
-      if (testUserId) await db.delete(schema.users).where(eq(schema.users.id, testUserId));
+      if (testUserId && waiterUserId) {
+        await db.delete(schema.users).where(inArray(schema.users.id, [testUserId, waiterUserId]));
+      }
     }
     await pool.end();
   });
 
-  it("POST /send-kitchen: marks items as printed, records sentAt, and groups by KITCHEN & BAR", async () => {
+  it("POST /send-kitchen: requires expectedVersion in body: returns 400 when missing", async () => {
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/send-kitchen`, {
       method: "POST",
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const res = await sendKitchenHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("expectedVersion");
+  });
+
+  it("POST /send-kitchen: returns 409 when expectedVersion does not match", async () => {
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/send-kitchen`, {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: 9999 }),
+    });
+    const res = await sendKitchenHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("phiên làm việc khác");
+  });
+
+  it("POST /send-kitchen: marks items as printed, records sentAt, and groups by KITCHEN & BAR", async () => {
+    const [ord] = await db.select().from(schema.orders).where(eq(schema.orders.id, testOrderId));
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/send-kitchen`, {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: ord.version }),
     });
 
     const res = await sendKitchenHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
@@ -181,9 +216,11 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
   });
 
   it("POST /send-kitchen: returns 409 when there are no new unprinted items", async () => {
+    const [ord] = await db.select().from(schema.orders).where(eq(schema.orders.id, testOrderId));
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/send-kitchen`, {
       method: "POST",
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: ord.version }),
     });
 
     const res = await sendKitchenHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
@@ -192,10 +229,29 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
     expect(json.error).toBe("Không có món mới để gửi bếp");
   });
 
+  it("Item 4: POST /send-kitchen returns 409 when order status is not DANG_PHUC_VU", async () => {
+    for (const forbiddenStatus of ["DA_GOP", "DA_HUY", "DA_THANH_TOAN"]) {
+      await db.update(schema.orders).set({ status: forbiddenStatus }).where(eq(schema.orders.id, testOrderId));
+      const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/send-kitchen`, {
+        method: "POST",
+        headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: 1 }),
+      });
+      const res = await sendKitchenHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error).toContain("không ở trạng thái đang phục vụ");
+    }
+    // Revert status
+    await db.update(schema.orders).set({ status: "DANG_PHUC_VU" }).where(eq(schema.orders.id, testOrderId));
+  });
+
   it("DELETE /orders/:id: rejects cancelling an order with printed items with 409", async () => {
+    const [ord] = await db.select().from(schema.orders).where(eq(schema.orders.id, testOrderId));
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}`, {
       method: "DELETE",
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: ord.version }),
     });
 
     const res = await deleteOrderHandler(req, { params: Promise.resolve({ id: String(testOrderId) }) });
@@ -204,10 +260,55 @@ describe("Order Send Kitchen & Cancel API (FR-03, UC-02, DEC-07)", () => {
     expect(json.error).toContain("Không thể hủy đơn đã có món gửi bếp");
   });
 
-  it("DELETE /orders/:id: cancels empty order and returns table to TRONG", async () => {
+  it("Item 3: DELETE /orders/:id: rejects non-empty orders (with unprinted items) with 409", async () => {
+    // Add an unprinted item to emptyOrderId
+    const [newItem] = await db.insert(schema.orderItems).values({
+      orderId: emptyOrderId,
+      menuItemId: kitchenItemId,
+      quantity: 1,
+      unitPrice: 55000,
+      isPrintedKitchen: false,
+    }).returning();
+
+    const [eOrd] = await db.select().from(schema.orders).where(eq(schema.orders.id, emptyOrderId));
     const req = new NextRequest(`http://localhost:3000/api/v1/orders/${emptyOrderId}`, {
       method: "DELETE",
-      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}` },
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: eOrd.version }),
+    });
+
+    const res = await deleteOrderHandler(req, { params: Promise.resolve({ id: String(emptyOrderId) }) });
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toContain("Đơn hàng không rỗng");
+
+    // Remove the item so emptyOrderId becomes empty again
+    await db.delete(schema.orderItems).where(eq(schema.orderItems.id, newItem.id));
+  });
+
+  it("Item 3: DELETE /orders/:id: rejects orders with status DA_THANH_TOAN, DA_GOP, DA_HUY with 409", async () => {
+    for (const forbiddenStatus of ["DA_GOP", "DA_HUY", "DA_THANH_TOAN"]) {
+      await db.update(schema.orders).set({ status: forbiddenStatus }).where(eq(schema.orders.id, emptyOrderId));
+      const req = new NextRequest(`http://localhost:3000/api/v1/orders/${emptyOrderId}`, {
+        method: "DELETE",
+        headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: 1 }),
+      });
+      const res = await deleteOrderHandler(req, { params: Promise.resolve({ id: String(emptyOrderId) }) });
+      expect(res.status).toBe(409);
+      const json = await res.json();
+      expect(json.error).toContain("không ở trạng thái đang phục vụ");
+    }
+    // Revert status
+    await db.update(schema.orders).set({ status: "DANG_PHUC_VU" }).where(eq(schema.orders.id, emptyOrderId));
+  });
+
+  it("DELETE /orders/:id: cancels empty order and returns table to TRONG", async () => {
+    const [eOrd] = await db.select().from(schema.orders).where(eq(schema.orders.id, emptyOrderId));
+    const req = new NextRequest(`http://localhost:3000/api/v1/orders/${emptyOrderId}`, {
+      method: "DELETE",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedVersion: eOrd.version }),
     });
 
     const res = await deleteOrderHandler(req, { params: Promise.resolve({ id: String(emptyOrderId) }) });

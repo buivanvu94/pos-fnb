@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { orders, orderItems, orderItemToppings, tables, areas, menuItems, Shift } from "@/db/schema";
 import { generateOrderCode } from "@/db/code-generator";
 import { TokenPayload } from "@/server/auth/jwt";
+import type { DbOrTx } from "@/server/tables/table-service";
 import { OrderItemDetail, OrderDetail } from "./order-types";
 
 export type { OrderItemDetail, OrderDetail };
@@ -98,7 +99,7 @@ export async function createTableOrder(
 /**
  * Retrieves full order details with all items, toppings, and pricing.
  */
-export async function getOrderDetails(orderId: number, tx: any = db): Promise<OrderDetail | null> {
+export async function getOrderDetails(orderId: number, tx: DbOrTx = db): Promise<OrderDetail | null> {
   const [order] = await tx
     .select({
       id: orders.id,

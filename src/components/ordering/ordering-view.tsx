@@ -67,6 +67,7 @@ export function OrderingView({
     changeQuantity,
     deleteItem,
     sendKitchen,
+    cancelEmptyOrder,
   } = useOrderActions(order, setOrder, fetchOrder, onTableStatusChanged);
 
   // Fetch menu, categories, toppings
@@ -171,6 +172,10 @@ export function OrderingView({
             onDeleteItem={deleteItem}
             onSendKitchen={sendKitchen}
             onOpenTransferModal={() => setTransferModalOpen(true)}
+            onCancelOrder={async () => {
+              const ok = await cancelEmptyOrder();
+              if (ok) onBackToTables();
+            }}
           />
         </Col>
       </Row>

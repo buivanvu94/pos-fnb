@@ -15,6 +15,7 @@ interface OrderCartProps {
   onDeleteItem: (item: OrderItemDetail) => void;
   onSendKitchen: () => void;
   onOpenTransferModal: () => void;
+  onCancelOrder?: () => void;
 }
 
 export function OrderCart({
@@ -26,6 +27,7 @@ export function OrderCart({
   onDeleteItem,
   onSendKitchen,
   onOpenTransferModal,
+  onCancelOrder,
 }: OrderCartProps) {
   const items = order?.items ?? [];
   const hasUnprintedItems = items.some((i) => !i.isPrintedKitchen);
@@ -174,6 +176,19 @@ export function OrderCart({
           >
             Gửi Bếp
           </Button>
+
+          {items.length === 0 && onCancelOrder && (
+            <Popconfirm
+              title="Hủy đơn hàng trống này?"
+              okText="Hủy đơn"
+              cancelText="Không"
+              onConfirm={onCancelOrder}
+            >
+              <Button danger block disabled={loading}>
+                Hủy đơn hàng trống
+              </Button>
+            </Popconfirm>
+          )}
 
           <Tooltip title="Chức năng thanh toán và in tạm tính sẽ mở ở Phase 07">
             <Button

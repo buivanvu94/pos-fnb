@@ -8,7 +8,7 @@ import { POST as transferHandler } from "@/app/api/v1/tables/transfer/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { getTestDbUrl } from "../setup/test-config";
 
-describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, US-04, FR-04, AC-04-1, AC-04-2, BR-02)", () => {
+describe("Table Transfer and Merge API - POST /api/v1/tables/transfer", () => {
   const testDbUrl = getTestDbUrl();
   let pool: Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
@@ -24,13 +24,26 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
   let tableWaitingId: number;
   let testShiftId: number;
   let testUserId: number;
+  let waiterUserId: number;
 
   let order01Id: number;
   let order02Id: number;
   let orderWaitingId: number;
   let menuItemAId: number;
   let menuItemBId: number;
+  let luxuryItemId: number;
   let toppingId: number;
+
+  // Extra tables/orders for overflow and deadlock tests
+  let extraTableAId: number;
+  let extraTableBId: number;
+  let extraOrderAId: number;
+  let extraOrderBId: number;
+
+  let overflowTable1Id: number;
+  let overflowTable2Id: number;
+  let overflowOrder1Id: number;
+  let overflowOrder2Id: number;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
@@ -42,7 +55,13 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
       .returning();
     testUserId = user.id;
 
-    waiterToken = await signAuthToken({ userId: 994, username: `w_${tag}`, fullName: "Phục Vụ", role: "PHUC_VU" });
+    const [waiter] = await db
+      .insert(schema.users)
+      .values({ username: `w_${tag}`, passwordHash: "dummy", fullName: "Phục Vụ", role: "PHUC_VU" })
+      .returning();
+    waiterUserId = waiter.id;
+
+    waiterToken = await signAuthToken({ userId: waiter.id, username: waiter.username, fullName: waiter.fullName, role: "PHUC_VU" });
 
     const [area] = await db
       .insert(schema.areas)
@@ -50,7 +69,6 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
       .returning();
     testAreaId = area.id;
 
-    // Create tables (code <= 20 chars)
     const [t1] = await db
       .insert(schema.tables)
       .values({ code: `T1_${tag}`, name: `Bàn 01_${tag}`, areaId: testAreaId, capacity: 4, status: "DANG_DUNG" })
@@ -98,9 +116,15 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
       .returning();
     menuItemBId = mB.id;
 
+    const [lux] = await db
+      .insert(schema.menuItems)
+      .values({ code: `LX_${tag}`, categoryId: cat.id, name: "Luxury", price: 10000000, status: "DANG_BAN" })
+      .returning();
+    luxuryItemId = lux.id;
+
     const [top] = await db
       .insert(schema.toppings)
-      .values({ name: "Topping Thêm", price: 10000 })
+      .values({ name: "Topping", price: 10000, isAvailable: true })
       .returning();
     toppingId = top.id;
 
@@ -166,14 +190,45 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
     await db.insert(schema.orderItems).values([
       { orderId: orderWaitingId, menuItemId: menuItemAId, quantity: 1, unitPrice: 50000 },
     ]);
+
+    // Setup for deadlock test
+    const [ta] = await db.insert(schema.tables).values({ code: `TA_${tag}`, name: `Table A_${tag}`, areaId: testAreaId, capacity: 4, status: "DANG_DUNG" }).returning();
+    extraTableAId = ta.id;
+    const [tb] = await db.insert(schema.tables).values({ code: `TB_${tag}`, name: `Table B_${tag}`, areaId: testAreaId, capacity: 4, status: "DANG_DUNG" }).returning();
+    extraTableBId = tb.id;
+
+    const [oa] = await db.insert(schema.orders).values({ orderCode: `HDA_${tag}`, orderType: "TAI_BAN", tableId: extraTableAId, shiftId: testShiftId, totalAmount: 50000, finalAmount: 50000, status: "DANG_PHUC_VU", version: 1 }).returning();
+    extraOrderAId = oa.id;
+    await db.insert(schema.orderItems).values({ orderId: extraOrderAId, menuItemId: menuItemAId, quantity: 1, unitPrice: 50000 });
+
+    const [ob] = await db.insert(schema.orders).values({ orderCode: `HDB_${tag}`, orderType: "TAI_BAN", tableId: extraTableBId, shiftId: testShiftId, totalAmount: 50000, finalAmount: 50000, status: "DANG_PHUC_VU", version: 1 }).returning();
+    extraOrderBId = ob.id;
+    await db.insert(schema.orderItems).values({ orderId: extraOrderBId, menuItemId: menuItemAId, quantity: 1, unitPrice: 50000 });
+
+    // Setup for overflow test
+    const [ov1] = await db.insert(schema.tables).values({ code: `OV1_${tag}`, name: `Over 1_${tag}`, areaId: testAreaId, capacity: 4, status: "DANG_DUNG" }).returning();
+    overflowTable1Id = ov1.id;
+    const [ov2] = await db.insert(schema.tables).values({ code: `OV2_${tag}`, name: `Over 2_${tag}`, areaId: testAreaId, capacity: 4, status: "DANG_DUNG" }).returning();
+    overflowTable2Id = ov2.id;
+
+    // Order 1: 150 * 10,000,000 = 1.5 billion
+    const [ordOv1] = await db.insert(schema.orders).values({ orderCode: `HDOV1_${tag}`, orderType: "TAI_BAN", tableId: overflowTable1Id, shiftId: testShiftId, totalAmount: 1500000000, finalAmount: 1500000000, status: "DANG_PHUC_VU", version: 1 }).returning();
+    overflowOrder1Id = ordOv1.id;
+    await db.insert(schema.orderItems).values({ orderId: overflowOrder1Id, menuItemId: luxuryItemId, quantity: 150, unitPrice: 10000000 });
+
+    // Order 2: 80 * 10,000,000 = 800 million
+    const [ordOv2] = await db.insert(schema.orders).values({ orderCode: `HDOV2_${tag}`, orderType: "TAI_BAN", tableId: overflowTable2Id, shiftId: testShiftId, totalAmount: 800000000, finalAmount: 800000000, status: "DANG_PHUC_VU", version: 1 }).returning();
+    overflowOrder2Id = ordOv2.id;
+    await db.insert(schema.orderItems).values({ orderId: overflowOrder2Id, menuItemId: luxuryItemId, quantity: 80, unitPrice: 10000000 });
   });
 
   afterAll(async () => {
     if (db) {
       await db.delete(schema.orderItemToppings).where(sql`1 = 1`);
-      if (order01Id && order02Id && orderWaitingId) {
-        await db.delete(schema.orderItems).where(inArray(schema.orderItems.orderId, [order01Id, order02Id, orderWaitingId]));
-        await db.delete(schema.orders).where(inArray(schema.orders.id, [order01Id, order02Id, orderWaitingId]));
+      const allOrderIds = [order01Id, order02Id, orderWaitingId, extraOrderAId, extraOrderBId, overflowOrder1Id, overflowOrder2Id].filter(Boolean);
+      if (allOrderIds.length > 0) {
+        await db.delete(schema.orderItems).where(inArray(schema.orderItems.orderId, allOrderIds));
+        await db.delete(schema.orders).where(inArray(schema.orders.id, allOrderIds));
       }
       if (testShiftId) await db.delete(schema.shifts).where(eq(schema.shifts.id, testShiftId));
       if (testAreaId) {
@@ -181,10 +236,12 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
         await db.delete(schema.areas).where(eq(schema.areas.id, testAreaId));
       }
       if (toppingId) await db.delete(schema.toppings).where(eq(schema.toppings.id, toppingId));
-      if (menuItemAId && menuItemBId) {
-        await db.delete(schema.menuItems).where(inArray(schema.menuItems.id, [menuItemAId, menuItemBId]));
+      if (menuItemAId && menuItemBId && luxuryItemId) {
+        await db.delete(schema.menuItems).where(inArray(schema.menuItems.id, [menuItemAId, menuItemBId, luxuryItemId]));
       }
-      if (testUserId) await db.delete(schema.users).where(eq(schema.users.id, testUserId));
+      if (testUserId && waiterUserId) {
+        await db.delete(schema.users).where(inArray(schema.users.id, [testUserId, waiterUserId]));
+      }
     }
     await pool.end();
   });
@@ -297,5 +354,84 @@ describe("Table Transfer and Merge API - POST /api/v1/tables/transfer (API-03, U
 
     const [t5] = await db.select().from(schema.tables).where(eq(schema.tables.id, table05Id));
     expect(t5.status).toBe("TRONG");
+  });
+
+  it("Item 1 (BLOCKER): merge exceeding 2 billion ceiling aborts cleanly without moving items", async () => {
+    // Attempt merge: 1.5 billion + 800 million = 2.3 billion > 2 billion limit
+    const req = new NextRequest("http://localhost:3000/api/v1/tables/transfer", {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        banNguonId: overflowTable2Id,
+        banDichId: overflowTable1Id,
+        loai: "GOP",
+      }),
+    });
+
+    const res = await transferHandler(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("vượt quá giới hạn 2 tỷ VNĐ");
+
+    // Verify both orders remain intact and no items were moved
+    const [ord1] = await db.select().from(schema.orders).where(eq(schema.orders.id, overflowOrder1Id));
+    expect(ord1.status).toBe("DANG_PHUC_VU");
+    expect(ord1.totalAmount).toBe(1500000000);
+
+    const [ord2] = await db.select().from(schema.orders).where(eq(schema.orders.id, overflowOrder2Id));
+    expect(ord2.status).toBe("DANG_PHUC_VU");
+    expect(ord2.totalAmount).toBe(800000000);
+
+    const items1 = await db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, overflowOrder1Id));
+    expect(items1).toHaveLength(1);
+    expect(items1[0].quantity).toBe(150);
+
+    const items2 = await db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, overflowOrder2Id));
+    expect(items2).toHaveLength(1);
+    expect(items2[0].quantity).toBe(80);
+  });
+
+  it("Item 2 (BLOCKER): handles concurrent bidirectional merge requests without 500 / 40P01 deadlocks", async () => {
+    // Request 1: merge Table A into Table B
+    const req1 = new NextRequest("http://localhost:3000/api/v1/tables/transfer", {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        banNguonId: extraTableAId,
+        banDichId: extraTableBId,
+        loai: "GOP",
+      }),
+    });
+
+    // Request 2: merge Table B into Table A (opposite direction concurrently)
+    const req2 = new NextRequest("http://localhost:3000/api/v1/tables/transfer", {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        banNguonId: extraTableBId,
+        banDichId: extraTableAId,
+        loai: "GOP",
+      }),
+    });
+
+    const [res1, res2] = await Promise.all([
+      transferHandler(req1),
+      transferHandler(req2),
+    ]);
+
+    // Deadlock 40P01 would return 500. Ensure neither returned 500
+    expect(res1.status).not.toBe(500);
+    expect(res2.status).not.toBe(500);
+
+    // One must succeed (200), and the other must be cleanly rejected (409)
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    // Verify data integrity: exactly one table ended up merged into the other
+    const [finalA] = await db.select().from(schema.tables).where(eq(schema.tables.id, extraTableAId));
+    const [finalB] = await db.select().from(schema.tables).where(eq(schema.tables.id, extraTableBId));
+
+    const finalStatuses = [finalA.status, finalB.status].sort();
+    expect(finalStatuses).toEqual(["DANG_DUNG", "TRONG"]);
   });
 });
