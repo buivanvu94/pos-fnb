@@ -332,10 +332,16 @@ Hệ thống triển khai kiến trúc hàng đợi Outbox đồng bộ đám m�
 - Toàn bộ sự kiện được ghi nhận trong **cùng database transaction** với nghiệp vụ, cam kết tính nguyên tử (rollback nghiệp vụ thì không ghi event) và tính idempotent qua `idempotency_key` duy nhất theo thực thể và phiên bản.
 
 ### 10.2 Worker đồng bộ & Cấu hình
-- **Hàm xử lý `processSyncOutbox()`**: Quét và claim bản ghi `PENDING` bằng `SELECT ... FOR UPDATE SKIP LOCKED` kết hợp lease time chống trùng giữa nhiều worker.
-- **Gửi HTTP**: Đẩy POST JSON tới `SYNC_TARGET_URL` kèm header `Idempotency-Key` và tùy chọn `SYNC_API_KEY` (không log, không trả về). Hỗ trợ retry lũy thừa có giới hạn và timeout 30 giây.
+- **Khuyến nghị URL đích (`SYNC_TARGET_URL`)**: Nên là endpoint HTTPS công khai ngoài mạng LAN (ví dụ: Cloud API Gateway/Serverless) để dữ liệu từ POS offline tại quán được tập trung an toàn về đám mây khi có kết nối Internet.
+- **Hàm xử lý `processSyncOutbox()`**: Quét và claim bản ghi `PENDING` bằng `SELECT ... FOR UPDATE SKIP LOCKED` kết hợp lease time tính theo dung lượng batch và timeout nhằm chống trùng giữa nhiều worker. Gửi đồng thời theo đợt có giới hạn concurrency (5 luồng) bằng `Promise.allSettled`.
+- **Gửi HTTP & Idempotency**: Đẩy POST JSON tới `SYNC_TARGET_URL` kèm header `Idempotency-Key` và tùy chọn `SYNC_API_KEY` (không log, không trả về). Timeout mỗi request là 30 giây.
+- **Phân loại lỗi & Chiến lược Retry/Backoff (NFR-04)**:
+  - *Lỗi tạm thời*: Mất mạng, timeout, từ chối kết nối, HTTP 5xx, HTTP 408 (Request Timeout), HTTP 429 (Rate Limit) **không bao giờ bị chuyển sang FAILED vĩnh viễn**. Worker duy trì trạng thái `PENDING`, tăng bộ đếm `attempts` và tính thời điểm thử lại tiếp theo với lũy thừa có trần: `min(5 * 2^attempts, 300)` giây (tối đa 5 phút). Khi có mạng trở lại, hàng đợi sẽ tự động về 0 `PENDING`.
+  - *Lỗi dữ liệu vĩnh viễn*: Chỉ các mã lỗi HTTP 4xx khác (như 400 Bad Request, 422 Unprocessable Entity) mới chuyển sang trạng thái `FAILED` do server đích chủ động từ chối dữ liệu.
+- **Kích hoạt thủ công & Khôi phục (Requeue) cho Quản lý**:
+  - `POST /api/v1/sync/run` (chỉ dành cho `QUAN_LY`): Tự động gọi `requeueFailedSyncItems()` đưa mọi bản ghi `FAILED` về lại `PENDING` (đặt lại `attempts = 0`) và kích hoạt worker chạy ngay lập tức, trả về `{ requeuedCount, processed, sent, failed }`.
 - **Dung sai khi chưa cấu hình**: Nếu `SYNC_TARGET_URL` để trống, worker giữ nguyên sự kiện ở trạng thái `PENDING` và trả về số lượng chờ mà không gây lỗi hệ thống.
-- **Điểm kích hoạt**: Có thể chạy thủ công qua `POST /api/v1/sync/run` (chỉ dành cho `QUAN_LY`) hoặc chạy nền định kỳ qua Next.js instrumentation hook (`src/instrumentation.ts`) khi bật cờ `SYNC_WORKER_ENABLED=true`.
+- **Đồng bộ tự động trong nền**: Chạy định kỳ an toàn qua Next.js instrumentation hook (`src/instrumentation.ts`) khi biến môi trường `SYNC_WORKER_ENABLED=true`, có cờ chống chạy chồng lấn (`isRunning`) và guard chống trùng lặp do HMR trong môi trường phát triển.
 
 ### 10.3 Giám sát trạng thái trên POS
 - **API `GET /api/v1/sync/status`**: Cung cấp số lượng bản ghi `{ pending, failed, lastSyncedAt, configured }` cho mọi nhân viên đã đăng nhập.

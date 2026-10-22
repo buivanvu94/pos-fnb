@@ -21,6 +21,8 @@ export async function recordSyncInvoiceEvent(
 /**
  * Records a SYNC_SHIFT event into outbox inside the caller's transaction.
  * Idempotency key is derived from shiftId and shift status.
+ * Assumption: Shift status follows a strict one-way lifecycle progression
+ * (DANG_MO -> DA_DONG -> DA_DUYET), ensuring idempotencyKey is unique per stage.
  */
 export async function recordSyncShiftEvent(
   payload: SyncShiftPayload,

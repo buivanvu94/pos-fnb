@@ -154,5 +154,6 @@ describe("Sync Status & Run API Routes (NFR-04, DEC-10)", () => {
     const body = await mgrRes.json();
     expect(body.ok).toBe(true);
     expect(body.data).toBeDefined();
+    expect(typeof body.data.requeuedCount).toBe("number");
   });
 });

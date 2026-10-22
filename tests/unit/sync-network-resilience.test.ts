@@ -182,6 +182,5 @@ describe("Network Outage Resilience & Recovery (NFR-04, DEC-10)", () => {
         ),
       );
     expect(remainingPending.length).toBe(0);
-    expect(remainingPending.length).toBe(0);
   });
 });

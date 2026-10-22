@@ -15,8 +15,8 @@ describe("Sync Events Transaction Atomicity & Idempotency", () => {
   const testDbUrl = getTestDbUrl();
   let pool: Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
-  const rand = () => Math.random().toString(36).slice(2, 8);
-  const testTag = rand();
+  const randNum = () => Math.floor(1000000 + Math.random() * 9000000);
+  const createdKeys: string[] = [];
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
@@ -24,22 +24,24 @@ describe("Sync Events Transaction Atomicity & Idempotency", () => {
   });
 
   afterAll(async () => {
-    if (db) {
-      await db.delete(schema.outbox).where(eq(schema.outbox.lastError, testTag));
+    if (db && createdKeys.length > 0) {
+      await db.delete(schema.outbox).where(inArray(schema.outbox.idempotencyKey, createdKeys));
     }
     await pool.end();
   });
 
-  it("proves rollback in transaction discards outbox event", async () => {
-    const orderId = 999001;
-    const key = `sync_invoice_${orderId}_v1_${testTag}`;
+  it("proves rollback in transaction discards outbox event, and commit persists it", async () => {
+    const rollbackOrderId = randNum();
+    const rollbackKey = `sync_invoice_${rollbackOrderId}_v1`;
+    createdKeys.push(rollbackKey);
 
+    // 1. Transaction that rolls back -> no outbox item created
     await expect(
       db.transaction(async (tx) => {
         await recordSyncInvoiceEvent(
           {
-            orderId,
-            orderCode: `HD_${testTag}`,
+            orderId: rollbackOrderId,
+            orderCode: `HD_RB_${rollbackOrderId}`,
             orderType: "MANG_VE",
             status: "DA_THANH_TOAN",
             totalAmount: 50000,
@@ -59,56 +61,85 @@ describe("Sync Events Transaction Atomicity & Idempotency", () => {
       }),
     ).rejects.toThrow("Simulated business error rollback");
 
-    const rows = await db
-      .select()
-      .from(schema.outbox)
-      .where(eq(schema.outbox.idempotencyKey, key));
-    expect(rows.length).toBe(0);
+    const rollbackRows = await db.select().from(schema.outbox).where(eq(schema.outbox.idempotencyKey, rollbackKey));
+    expect(rollbackRows.length).toBe(0);
+
+    // 2. Transaction that commits -> outbox item persists
+    const commitOrderId = randNum();
+    const commitKey = `sync_invoice_${commitOrderId}_v1`;
+    createdKeys.push(commitKey);
+
+    await db.transaction(async (tx) => {
+      await recordSyncInvoiceEvent(
+        {
+          orderId: commitOrderId,
+          orderCode: `HD_CM_${commitOrderId}`,
+          orderType: "MANG_VE",
+          status: "DA_THANH_TOAN",
+          totalAmount: 70000,
+          discountAmount: 0,
+          finalAmount: 70000,
+          paymentMethod: "TIEN_MAT",
+          paidAt: new Date().toISOString(),
+          voidedAt: null,
+          voidReason: null,
+          queueNumber: 2,
+          shiftId: 1,
+          version: 1,
+        },
+        tx as any,
+      );
+    });
+
+    const commitRows = await db.select().from(schema.outbox).where(eq(schema.outbox.idempotencyKey, commitKey));
+    expect(commitRows.length).toBe(1);
+    expect(commitRows[0].status).toBe("PENDING");
   });
 
   it("proves duplicate idempotencyKey is ignored (onConflictDoNothing)", async () => {
-    const orderId = 999002;
+    const orderId = randNum();
+    const key = `sync_invoice_${orderId}_v1`;
+    createdKeys.push(key);
+
     const payload = {
       orderId,
-      orderCode: `HD_${testTag}_2`,
-      orderType: "MANG_VE",
-      status: "DA_THANH_TOAN",
+      orderCode: `HD_DUP_${orderId}`,
+      orderType: "MANG_VE" as const,
+      status: "DA_THANH_TOAN" as const,
       totalAmount: 60000,
       discountAmount: 0,
       finalAmount: 60000,
-      paymentMethod: "TIEN_MAT",
+      paymentMethod: "TIEN_MAT" as const,
       paidAt: new Date().toISOString(),
       voidedAt: null,
       voidReason: null,
-      queueNumber: 2,
+      queueNumber: 3,
       shiftId: 1,
       version: 1,
     };
 
     const first = await recordSyncInvoiceEvent(payload, db as any);
     expect(first).not.toBeNull();
-
-    // Replay with identical payload and version
     const second = await recordSyncInvoiceEvent(payload, db as any);
     expect(second).toBeNull();
 
-    const rows = await db
-      .select()
-      .from(schema.outbox)
-      .where(eq(schema.outbox.idempotencyKey, `sync_invoice_${orderId}_v1`));
+    const rows = await db.select().from(schema.outbox).where(eq(schema.outbox.idempotencyKey, key));
     expect(rows.length).toBe(1);
-
-    // Cleanup
-    await db
-      .delete(schema.outbox)
-      .where(eq(schema.outbox.idempotencyKey, `sync_invoice_${orderId}_v1`));
   });
 
   it("enqueues SYNC_SHIFT, SYNC_CASH_TXN, and SYNC_AUDIT with expected fields", async () => {
+    const shiftId = randNum();
+    const cashEntryId = randNum();
+    const auditId = randNum();
+    const shiftKey = `sync_shift_${shiftId}_DANG_MO`;
+    const cashKey = `sync_cash_txn_${cashEntryId}`;
+    const auditKey = `sync_audit_${auditId}`;
+    createdKeys.push(shiftKey, cashKey, auditKey);
+
     const shiftRes = await recordSyncShiftEvent(
       {
-        shiftId: 88801,
-        shiftCode: `CA_${testTag}`,
+        shiftId,
+        shiftCode: `CA_${shiftId}`,
         cashierId: 10,
         initialCash: 100000,
         actualCash: null,
@@ -123,45 +154,20 @@ describe("Sync Events Transaction Atomicity & Idempotency", () => {
       db as any,
     );
     expect(shiftRes?.type).toBe("SYNC_SHIFT");
-    expect(shiftRes?.status).toBe("PENDING");
+    expect(shiftRes?.idempotencyKey).toBe(shiftKey);
 
     const cashRes = await recordSyncCashTxnEvent(
-      {
-        id: 77701,
-        shiftId: 88801,
-        entryType: "THU",
-        amount: 25000,
-        reason: "Thu tiền đổi",
-        performedBy: 10,
-        createdAt: new Date().toISOString(),
-      },
+      { id: cashEntryId, shiftId, entryType: "THU", amount: 25000, reason: "Thu tiền đổi", performedBy: 10, createdAt: new Date().toISOString() },
       db as any,
     );
     expect(cashRes?.type).toBe("SYNC_CASH_TXN");
+    expect(cashRes?.idempotencyKey).toBe(cashKey);
 
     const auditRes = await recordSyncAuditEvent(
-      {
-        id: 66601,
-        userId: 10,
-        action: "TEST_ACTION",
-        entityType: "ORDER",
-        entityId: "123",
-        reason: "Testing audit",
-        metadata: { tag: testTag },
-        ipAddress: "127.0.0.1",
-        createdAt: new Date().toISOString(),
-      },
+      { id: auditId, userId: 10, action: "TEST_ACTION", entityType: "ORDER", entityId: "123", reason: "Testing audit", metadata: { tag: "test" }, ipAddress: "127.0.0.1", createdAt: new Date().toISOString() },
       db as any,
     );
     expect(auditRes?.type).toBe("SYNC_AUDIT");
-
-    // Cleanup
-    await db.delete(schema.outbox).where(
-      inArray(schema.outbox.id, [
-        shiftRes!.id,
-        cashRes!.id,
-        auditRes!.id,
-      ]),
-    );
+    expect(auditRes?.idempotencyKey).toBe(auditKey);
   });
 });
