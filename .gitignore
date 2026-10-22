@@ -10,3 +10,8 @@ next-env.d.ts
 backup_*.sql
 *.tsbuildinfo
 tmp/
+
+# Local DB backups and e2e output
+/backups/
+/playwright-report/
+/test-results/
