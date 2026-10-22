@@ -12,6 +12,8 @@ export interface ManagerApprovalModalProps {
   title: string;
   actionDescription?: string;
   isPinRequired?: boolean;
+  isReasonRequired?: boolean;
+  defaultReason?: string;
   errorMessage?: string | null;
   lockoutUntil?: number | null;
   loading?: boolean;
@@ -28,6 +30,8 @@ export function ManagerApprovalModal({
   title,
   actionDescription,
   isPinRequired = true,
+  isReasonRequired = true,
+  defaultReason,
   errorMessage,
   lockoutUntil,
   loading = false,
@@ -74,7 +78,7 @@ export function ManagerApprovalModal({
   };
 
   const canSubmit =
-    reason.trim().length >= 5 &&
+    (!isReasonRequired || reason.trim().length >= 5) &&
     (!isPinRequired || (pin.length >= 4 && pin.length <= 6)) &&
     !isLocked &&
     !loading;
@@ -83,7 +87,7 @@ export function ManagerApprovalModal({
     if (canSubmit) {
       onConfirm({
         pinCode: isPinRequired ? pin : undefined,
-        lyDo: reason.trim(),
+        lyDo: reason.trim() || defaultReason || "Ký duyệt chốt ca làm việc",
       });
       // Clear PIN immediately from state
       setPin("");
@@ -126,12 +130,14 @@ export function ManagerApprovalModal({
         )}
 
         <div>
-          <Text strong>Lý do thực hiện (tối thiểu 5 ký tự):</Text>
+          <Text strong>
+            {isReasonRequired ? "Lý do thực hiện (tối thiểu 5 ký tự):" : "Lý do thực hiện (tùy chọn):"}
+          </Text>
           <Input.TextArea
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Nhập lý do chi tiết..."
+            placeholder={isReasonRequired ? "Nhập lý do chi tiết..." : "Nhập lý do (tùy chọn)..."}
             maxLength={255}
             showCount
             style={{ marginTop: 6 }}

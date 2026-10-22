@@ -38,9 +38,18 @@ export async function POST(req: NextRequest) {
 
   const { shiftId, pin, pinCode, lyDo, reason } = body as Record<string, unknown>;
 
+  if (shiftId !== undefined) {
+    if (typeof shiftId !== "number" || !Number.isInteger(shiftId) || shiftId <= 0) {
+      return NextResponse.json(
+        { ok: false, error: "shiftId phải là số nguyên dương" },
+        { status: 400 },
+      );
+    }
+  }
+
   const effectivePin = typeof pin === "string" ? pin : typeof pinCode === "string" ? pinCode : "";
   const effectiveReason = typeof lyDo === "string" ? lyDo : typeof reason === "string" ? reason : undefined;
-  const parsedShiftId = shiftId !== undefined ? Number(shiftId) : undefined;
+  const parsedShiftId = shiftId as number | undefined;
 
   const clientIp = getClientIp(req);
   const userAgent = getUserAgent(req);

@@ -3,7 +3,7 @@ import type { ShiftCloseTelegramPayload } from "./outbox-types";
 
 /**
  * Formats shift close summary into a structured Telegram message.
- * Pure function: takes payload and produces readable Markdown text.
+ * Pure function: takes payload and produces readable plain text (safe without parse_mode).
  */
 export function formatShiftCloseTelegramMessage(
   payload: ShiftCloseTelegramPayload,
@@ -14,7 +14,7 @@ export function formatShiftCloseTelegramMessage(
       : `${payload.difference > 0 ? "+" : ""}${formatVnd(payload.difference)}`;
 
   const lines = [
-    `🔔 *BÁO CÁO KẾT CA: ${payload.shiftCode}*`,
+    `🔔 BÁO CÁO KẾT CA: ${payload.shiftCode}`,
     `👤 Thu ngân: ${payload.cashierName}`,
   ];
 
@@ -26,22 +26,22 @@ export function formatShiftCloseTelegramMessage(
     `⏱️ Mở: ${new Date(payload.openedAt).toLocaleString("vi-VN")}`,
     `⏱️ Đóng: ${new Date(payload.closedAt).toLocaleString("vi-VN")}`,
     `─────────────────`,
-    `💰 *DOANH THU CA:*`,
+    `💰 DOANH THU CA:`,
     `• Tiền mặt: ${formatVnd(payload.cashSales)}`,
     `• VietQR: ${formatVnd(payload.vietqrSales)}`,
-    `• *Tổng doanh thu:* ${formatVnd(payload.totalSales)}`,
+    `• Tổng doanh thu: ${formatVnd(payload.totalSales)}`,
     `─────────────────`,
-    `💵 *KIỂM KÊ KÉT TIỀN:*`,
+    `💵 KIỂM KÊ KÉT TIỀN:`,
     `• Tiền đầu ca: ${formatVnd(payload.initialCash)}`,
     `• Thu vặt (+): ${formatVnd(payload.cashIn)}`,
     `• Chi vặt (-): ${formatVnd(payload.cashOut)}`,
     `• Tiền mặt lý thuyết: ${formatVnd(payload.expectedCash)}`,
     `• Tiền thực đếm: ${formatVnd(payload.actualCash)}`,
-    `• *Độ lệch két:* ${diffLabel}`,
+    `• Độ lệch két: ${diffLabel}`,
   );
 
   if (payload.explanation) {
-    lines.push(`📝 *Giải trình lệch:* ${payload.explanation}`);
+    lines.push(`📝 Giải trình lệch: ${payload.explanation}`);
   }
 
   lines.push(

@@ -1,6 +1,6 @@
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, payments } from "@/db/schema";
+import { orders, payments, shifts } from "@/db/schema";
 import { generateVietQrString, formatVietqrTransferContent } from "./vietqr-generator";
 import type {
   CreateVietQrPaymentParams,
@@ -26,6 +26,20 @@ export async function createOrRefreshVietQrPayment(
 
     if (!order) {
       return { ok: false, status: 404, error: "Đơn hàng không tồn tại" };
+    }
+
+    const targetShiftId = shiftId || order.shiftId;
+    if (targetShiftId) {
+      const [currentShift] = await tx
+        .select({ id: shifts.id, status: shifts.status })
+        .from(shifts)
+        .where(eq(shifts.id, targetShiftId))
+        .limit(1)
+        .for("share");
+
+      if (!currentShift || currentShift.status !== "DANG_MO") {
+        return { ok: false, status: 409, error: "Ca làm việc đã kết thúc hoặc không ở trạng thái Đang mở" };
+      }
     }
 
     if (order.status !== "DANG_PHUC_VU") {

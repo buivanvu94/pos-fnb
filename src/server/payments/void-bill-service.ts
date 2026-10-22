@@ -118,6 +118,20 @@ export async function voidPaidBill(params: VoidBillParams): Promise<VoidBillResu
   // 4. ACID Transaction to void bill
   try {
     await db.transaction(async (tx) => {
+      // 0. Lock shift FOR SHARE to verify it is still DANG_MO
+      if (payment) {
+        const [shiftRow] = await tx
+          .select({ id: shifts.id, status: shifts.status })
+          .from(shifts)
+          .where(eq(shifts.id, payment.shiftId))
+          .limit(1)
+          .for("share");
+
+        if (!shiftRow || shiftRow.status !== "DANG_MO") {
+          throw new TxAbortError("Không thể hủy hóa đơn vì ca làm việc của hóa đơn này đã đóng hoặc đang chờ duyệt!", 409);
+        }
+      }
+
       const [lockedOrder] = await tx
         .select()
         .from(orders)

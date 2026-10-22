@@ -1,4 +1,4 @@
-import { eq, and, sql, or, isNull, lte } from "drizzle-orm";
+import { eq, and, or, isNull, lte, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { outbox, OutboxItem } from "@/db/schema";
 import { sendTelegramNotification } from "./telegram-sender";
@@ -41,8 +41,9 @@ export async function enqueueOutboxItem(
 
 /**
  * Processes pending items in the outbox queue.
- * Implements exponential backoff retry and status transitions (PENDING -> SENT | FAILED).
- * Callable from API route or background triggers without throwing errors.
+ * Claims items atomically using SELECT ... FOR UPDATE SKIP LOCKED with a 60-second lease
+ * to prevent duplicate sends when multiple workers run concurrently.
+ * Implements exponential backoff retry on failure.
  */
 export async function processOutbox(
   options?: ProcessOutboxOptions,
@@ -53,22 +54,44 @@ export async function processOutbox(
 
   const now = new Date();
 
-  // Find due pending items
-  const items = await db
-    .select()
-    .from(outbox)
-    .where(
-      and(
-        eq(outbox.status, "PENDING"),
-        or(isNull(outbox.nextAttemptAt), lte(outbox.nextAttemptAt, now)),
-      ),
-    )
-    .limit(batchSize);
+  // Atomically claim pending items with SKIP LOCKED and lease
+  const claimedItems = await db.transaction(async (tx) => {
+    const candidateItems = await tx
+      .select()
+      .from(outbox)
+      .where(
+        and(
+          eq(outbox.status, "PENDING"),
+          or(isNull(outbox.nextAttemptAt), lte(outbox.nextAttemptAt, now)),
+        ),
+      )
+      .orderBy(outbox.id)
+      .limit(batchSize)
+      .for("update", { skipLocked: true });
+
+    if (candidateItems.length === 0) {
+      return [];
+    }
+
+    const leaseUntil = new Date(Date.now() + 60 * 1000);
+    const itemIds = candidateItems.map((i) => i.id);
+
+    await tx
+      .update(outbox)
+      .set({ nextAttemptAt: leaseUntil })
+      .where(inArray(outbox.id, itemIds));
+
+    return candidateItems;
+  });
+
+  if (claimedItems.length === 0) {
+    return { processed: 0, sent: 0, failed: 0 };
+  }
 
   let sent = 0;
   let failed = 0;
 
-  for (const item of items) {
+  for (const item of claimedItems) {
     let success = false;
     let errorMessage: string | undefined;
 
@@ -83,7 +106,6 @@ export async function processOutbox(
         success = res.ok;
         errorMessage = res.error;
       } else {
-        // Unknown or future type (e.g. Phase 11 cloud sync)
         errorMessage = `Unsupported outbox item type: ${item.type}`;
       }
     } catch (err: unknown) {
@@ -123,7 +145,7 @@ export async function processOutbox(
   }
 
   return {
-    processed: items.length,
+    processed: claimedItems.length,
     sent,
     failed,
   };

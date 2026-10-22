@@ -38,8 +38,8 @@ export async function withManagerApproval(
     };
   }
 
-  // 3. Managers performing their own sensitive actions do not require PIN (unless action explicitly mandates PIN like APPROVE_CLOSE_SHIFT)
-  if (actingUser.role === "QUAN_LY" && action !== "APPROVE_CLOSE_SHIFT") {
+  // 3. Managers performing their own sensitive actions do not require PIN
+  if (actingUser.role === "QUAN_LY") {
     return {
       ok: true,
       approverId: userId,

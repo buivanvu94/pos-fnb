@@ -1,3 +1,5 @@
+-- Clear outbox table before schema alterations (outbox was unused prior to Phase 09 and schema is being redesigned)
+DELETE FROM "outbox";--> statement-breakpoint
 ALTER TABLE "outbox" ALTER COLUMN "payload" SET DATA TYPE jsonb USING "payload"::jsonb;--> statement-breakpoint
 ALTER TABLE "outbox" ADD COLUMN "type" varchar(50) NOT NULL;--> statement-breakpoint
 ALTER TABLE "outbox" ADD COLUMN "idempotency_key" varchar(128);--> statement-breakpoint

@@ -19,7 +19,7 @@ export function useCloseShiftData() {
           if (s.actualCash !== null && s.actualCash !== undefined) {
             setActualCash(s.actualCash);
           } else {
-            setActualCash(s.expectedCash);
+            setActualCash(null);
           }
           if (s.explanation) {
             setExplanation(s.explanation);

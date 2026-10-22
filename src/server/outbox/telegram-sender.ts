@@ -53,7 +53,6 @@ export async function sendTelegramNotification(
       body: JSON.stringify({
         chat_id: chatId,
         text: messageText,
-        parse_mode: "Markdown",
       }),
     });
 

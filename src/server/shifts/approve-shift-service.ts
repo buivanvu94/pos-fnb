@@ -1,7 +1,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { shifts, users, printJobs, auditLogs } from "@/db/schema";
-import { withManagerApproval } from "@/server/approvals/with-manager-approval";
+import { verifyManagerPin } from "@/server/approvals/pin-service";
 import { getShiftFinancialReport } from "./shift-financial-report";
 import { countUnpaidTables } from "./shift-tables-check";
 import { formatErr04 } from "@/lib/error-catalog";
@@ -31,104 +31,112 @@ export interface ApproveShiftResult {
 }
 
 /**
- * Handles manager approval to close a shift (FR-09, BR-05, BR-07, AC-10-2).
- * Transition: CHO_DUYET (or DANG_MO) -> DA_DONG.
- * Queues Z-Report in print_jobs, audits ca_lam_viec_da_dong event,
- * enqueues outbox message for Telegram, and triggers non-blocking processing.
+ * Handles manager approval to close a shift (FR-09, BR-05, BR-07, DEC-02, AC-10-2).
+ * Transition: strictly CHO_DUYET -> DA_DONG (409 if DANG_MO or DA_DONG).
+ * Requires manager PIN verification directly (retaining lockout and failed attempts).
+ * Serializes concurrent approvals using SELECT ... FOR UPDATE inside a single transaction.
  */
 export async function approveShift(params: ApproveShiftParams): Promise<ApproveShiftResult> {
   const { shiftId, pinCode, lyDo, user, clientIp, userAgent } = params;
 
-  // 1. Locate the target shift
+  // 1. PIN is strictly required for manager approval (DEC-02)
+  if (!pinCode || typeof pinCode !== "string" || !pinCode.trim()) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Vui lòng nhập mã PIN Quản lý để ký duyệt",
+    };
+  }
+
+  const pinResult = await verifyManagerPin(user.userId, pinCode.trim(), clientIp, userAgent);
+  if (!pinResult.valid) {
+    return {
+      ok: false,
+      status: pinResult.status || 403,
+      error: pinResult.error,
+    };
+  }
+
+  const approver = pinResult.approver!;
+  const effectiveReason = (lyDo ?? "Ký duyệt chốt ca làm việc").trim() || "Ký duyệt chốt ca làm việc";
+
   const shiftCondition =
     shiftId !== undefined
       ? eq(shifts.id, shiftId)
       : and(eq(shifts.cashierId, user.userId), eq(shifts.status, "CHO_DUYET"));
 
-  const [shift] = await db.select().from(shifts).where(shiftCondition).limit(1);
+  let zReportResult: ZReportPayload | null = null;
+  let printJobIdToDispatch: number | undefined;
 
-  if (!shift) {
-    return {
-      ok: false,
-      status: 404,
-      error: "Không tìm thấy ca làm việc cần duyệt chốt ca",
-    };
-  }
+  // 2. Transaction with row lock to serialize concurrent approvals
+  const txResult = await db.transaction(async (tx) => {
+    const [lockedShift] = await tx
+      .select()
+      .from(shifts)
+      .where(shiftCondition)
+      .limit(1)
+      .for("update");
 
-  if (shift.status === "DA_DONG") {
-    return {
-      ok: false,
-      status: 409,
-      error: "Ca làm việc này đã được chốt và đóng trước đó",
-    };
-  }
+    if (!lockedShift) {
+      return { ok: false, status: 404, error: "Không tìm thấy ca làm việc cần duyệt chốt ca" };
+    }
 
-  // 2. Check for unpaid tables before proceeding (BR-07, ERR-04)
-  const unpaidTableCount = await countUnpaidTables(shift.id, db);
-  if (unpaidTableCount > 0) {
-    return {
-      ok: false,
-      status: 409,
-      error: formatErr04(unpaidTableCount),
-    };
-  }
+    if (lockedShift.status === "DA_DONG") {
+      return { ok: false, status: 409, error: "Ca làm việc này đã được chốt và đóng trước đó" };
+    }
 
-  // 3. Manager PIN approval gate (Phase 06)
-  const effectiveReason = (lyDo ?? "Ký duyệt chốt ca làm việc").trim();
-  const approval = await withManagerApproval(
-    {
-      userId: user.userId,
-      id: user.userId,
-      username: user.username,
-      fullName: user.fullName || user.username,
-      role: user.role,
-    },
-    "APPROVE_CLOSE_SHIFT",
-    { pinCode, lyDo: effectiveReason },
-    clientIp,
-    userAgent,
-  );
+    if (lockedShift.status !== "CHO_DUYET") {
+      return {
+        ok: false,
+        status: 409,
+        error: "Ca làm việc chưa được kiểm đếm (phải kiểm đếm trước khi Quản lý duyệt)",
+      };
+    }
 
-  if (!approval.ok) {
-    return { ok: false, status: approval.status, error: approval.error };
-  }
+    if (lockedShift.actualCash === null || lockedShift.actualCash === undefined) {
+      return { ok: false, status: 409, error: "Ca làm việc chưa hoàn tất kiểm đếm tiền mặt" };
+    }
 
-  // 4. Compute financial metrics for Z-Report and Telegram
-  const financial = await getShiftFinancialReport(shift.id, shift.initialCash, db);
+    const unpaidTableCount = await countUnpaidTables(lockedShift.id, tx);
+    if (unpaidTableCount > 0) {
+      return { ok: false, status: 409, error: formatErr04(unpaidTableCount) };
+    }
 
-  const [cashier] = await db
-    .select({ id: users.id, username: users.username, fullName: users.fullName })
-    .from(users)
-    .where(eq(users.id, shift.cashierId))
-    .limit(1);
+    const financial = await getShiftFinancialReport(lockedShift.id, lockedShift.initialCash, tx);
 
-  const cashierName = cashier?.fullName || cashier?.username || "Thu ngân";
-  const now = new Date();
-  const shiftDurationSeconds = Math.round((now.getTime() - shift.openedAt.getTime()) / 1000);
-  const actualCash = shift.actualCash ?? financial.expectedCash;
-  const difference = shift.difference ?? actualCash - financial.expectedCash;
+    const [cashier] = await tx
+      .select({ id: users.id, username: users.username, fullName: users.fullName })
+      .from(users)
+      .where(eq(users.id, lockedShift.cashierId))
+      .limit(1);
 
-  const { zReportPayload, telegramPayload } = buildCloseShiftPayloads({
-    shift,
-    financial,
-    cashierName,
-    approverName: approval.approverName,
-    now,
-    actualCash,
-    difference,
-  });
+    const cashierName = cashier?.fullName || cashier?.username || "Thu ngân";
+    const now = new Date();
+    const shiftDurationSeconds = Math.round((now.getTime() - lockedShift.openedAt.getTime()) / 1000);
+    const actualCash = lockedShift.actualCash;
+    const difference = lockedShift.difference ?? (actualCash - financial.expectedCash);
 
-  // 5. Atomic database transaction
-  const result = await db.transaction(async (tx) => {
+    const { zReportPayload, telegramPayload } = buildCloseShiftPayloads({
+      shift: lockedShift,
+      financial,
+      cashierName,
+      approverName: approver.fullName || approver.username,
+      now,
+      actualCash,
+      difference,
+    });
+
+    zReportResult = zReportPayload;
+
     const [updated] = await tx
       .update(shifts)
       .set({
         status: "DA_DONG",
         closedAt: now,
-        approvedById: approval.approverId,
+        approvedById: approver.id,
         updatedAt: now,
       })
-      .where(eq(shifts.id, shift.id))
+      .where(eq(shifts.id, lockedShift.id))
       .returning();
 
     const [job] = await tx
@@ -141,38 +149,44 @@ export async function approveShift(params: ApproveShiftParams): Promise<ApproveS
       })
       .returning();
 
+    printJobIdToDispatch = job?.id;
+
     await tx.insert(auditLogs).values({
       userId: user.userId,
       action: "CLOSE_SHIFT_APPROVE",
       entityType: "SHIFT",
-      entityId: String(shift.id),
-      reason: approval.reason,
+      entityId: String(lockedShift.id),
+      reason: effectiveReason,
       metadata: JSON.stringify({
         event: "ca_lam_viec_da_dong",
-        maCa: shift.shiftCode,
-        nhanVienId: shift.cashierId,
+        maCa: lockedShift.shiftCode,
+        nhanVienId: lockedShift.cashierId,
         doLechTien: difference,
         thoiGianCa: shiftDurationSeconds,
-        approverId: approval.approverId,
-        approverName: approval.approverName,
+        approverId: approver.id,
+        approverName: approver.fullName || approver.username,
       }),
       ipAddress: clientIp,
     });
 
-    await enqueueOutboxItem("TELEGRAM_SHIFT_CLOSE", telegramPayload, `telegram_shift_close_${shift.id}`, tx);
+    await enqueueOutboxItem("TELEGRAM_SHIFT_CLOSE", telegramPayload, `telegram_shift_close_${lockedShift.id}`, tx);
 
-    return { updated, jobId: job?.id };
+    return { ok: true, status: 200, shift: updated };
   });
 
-  // 6. Non-blocking side effects after commit
-  if (result.jobId) {
-    dispatchPrintJob(result.jobId).catch((err) => console.error("Print dispatch error:", err));
+  if (!txResult.ok) {
+    return { ok: false, status: txResult.status, error: txResult.error };
+  }
+
+  // 3. Non-blocking side effects after commit
+  if (printJobIdToDispatch) {
+    dispatchPrintJob(printJobIdToDispatch).catch((err) => console.error("Print dispatch error:", err));
   }
   processOutbox().catch((err) => console.error("Outbox process error:", err));
 
   return {
     ok: true,
     status: 200,
-    data: { shift: result.updated, zReport: zReportPayload },
+    data: { shift: txResult.shift!, zReport: zReportResult! },
   };
 }

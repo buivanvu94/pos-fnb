@@ -178,6 +178,8 @@ export default function CloseShiftPage() {
         title="Quản lý ký duyệt đóng ca làm việc"
         actionDescription={`Duyệt chốt ca ${shiftData.shiftCode}. Hành động này sẽ khóa ca, in Z-Report và đăng xuất phiên làm việc.`}
         isPinRequired={true}
+        isReasonRequired={false}
+        defaultReason="Ký duyệt chốt ca làm việc"
         loading={approvalLoading}
         errorMessage={approvalError}
         onConfirm={handleApprovalConfirm}

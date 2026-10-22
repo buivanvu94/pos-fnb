@@ -275,7 +275,11 @@ Hệ thống tích hợp thanh toán VietQR động chuẩn EMVCo và cổng Web
 
 Hệ thống cung cấp quy trình kết ca làm việc 3 bước chuẩn F&B, kiểm đếm tiền mặt, tự động tính toán độ lệch theo quy tắc BR-05, ký duyệt mã PIN Quản lý, in biên bản bàn giao ca (Z-Report) và đẩy thông báo tóm tắt doanh thu qua hàng đợi outbox Telegram (US-10, SCR-08, FR-08, FR-09, BR-05, BR-06, BR-07, DEC-02, DEC-14, ERR-04, ERR-05).
 
-### 9.1 Quy trình kết ca 3 bước & Kiểm đếm tiền mặt (SCR-08, FR-08, BR-05)
+### 9.1 Giả định hệ thống & Kiểm soát trạng thái ca
+- **Mô hình 1 quầy thu ngân**: Hệ thống thiết kế phục vụ quầy thu ngân chính, tại mỗi thời điểm một thu ngân chỉ được phép có tối đa 1 ca làm việc đang hoạt động. Điểm cuối `POST /api/v1/shifts/open` kiểm tra và từ chối (HTTP 409) nếu nhân viên vẫn còn ca ở trạng thái `DANG_MO` hoặc `CHO_DUYET`.
+- **Khóa hàng giao dịch bán hàng**: Mọi đường ghi nhận doanh thu (thanh toán tiền mặt `payOrderCash`, tạo mã/xác nhận VietQR, tạo đơn bàn/mang về, ghi nhận thu/chi vặt và hủy hóa đơn `voidPaidBill`) đều thực hiện kiểm tra ca làm việc còn `DANG_MO` dưới khóa hàng `FOR SHARE`/`FOR UPDATE` trong database transaction. Khi ca đã chuyển sang `CHO_DUYET` hoặc `DA_DONG`, mọi nỗ lực thanh toán, mở đơn hoặc hủy bill đều bị chặn ngay lập tức với HTTP 409.
+
+### 9.2 Quy trình kết ca 3 bước & Kiểm đếm tiền mặt (SCR-08, FR-08, BR-05)
 - **Kiểm tra bàn chưa thanh toán (BR-07, ERR-04)**:
   - Khi thu ngân bấm kết ca, hệ thống kiểm tra các bàn đang có đơn phục vụ (`DANG_PHUC_VU`).
   - Nếu còn bàn chưa thanh toán, hệ thống chặn với HTTP 409 và thông báo lỗi `ERR-04` nguyên văn: *"Không thể đóng ca! Vẫn còn {so_luong_ban} bàn chưa hoàn tất thanh toán. Vui lòng thanh toán hoặc bàn giao bàn."*.
@@ -285,15 +289,16 @@ Hệ thống cung cấp quy trình kết ca làm việc 3 bước chuẩn F&B, k
 - **Độ lệch két & Bắt buộc giải trình (BR-06, ERR-05)**:
   `Độ lệch = Tiền cuối ca thực đếm - Tiền lý thuyết`.
   - Khớp tiền (0đ): Hiển thị nhãn xanh lá `Khớp tiền (0 ₫)`.
-  - Lệch tiền (> 0đ hoặc < 0đ): Hiển thị nhãn đỏ `Thừa tiền / Thiếu tiền` và bắt buộc nhập ô giải trình.
+  - Lệch tiền (> 0đ hoặc < 0đ): Hiển thị nhãn đỏ `Thừa tiền / Thiếu tiền` và bắt buộc nhập ô giải trình (tối đa 255 ký tự).
   - Bỏ trống giải trình: Chặn với HTTP 422 và thông báo `ERR-05`: *"Tiền mặt thực tế bị lệch {so_tien_lech} VNĐ. Vui lòng nhập lý do giải trình để tiếp tục!"*.
 - **Chuyển trạng thái ca (`CHO_DUYET`)**:
-  - `POST /api/v1/shifts/close` ghi nhận số tiền thực đếm, độ lệch và giải trình, đưa ca về trạng thái `CHO_DUYET` và chuyển sang bước ký duyệt của Quản lý.
+  - `POST /api/v1/shifts/close` chạy trong 1 transaction khóa dòng ca (`FOR UPDATE`), ghi nhận số tiền thực đếm, độ lệch và giải trình, đưa ca về trạng thái `CHO_DUYET` và chuyển sang bước ký duyệt của Quản lý.
 
-### 9.2 Ký duyệt mã PIN Quản lý & Biên bản Z-Report (FR-09, DEC-02)
-- **Cổng ký duyệt mã PIN (`POST /api/v1/shifts/approve`)**:
-  - Tái sử dụng cổng phê duyệt `withManagerApproval` (Phase 06). Quản lý nhập mã PIN 4-6 số trên modal cảm ứng.
-  - Nhập sai mã PIN: Báo lỗi `ERR-02` (403), sai quá 5 lần khóa tạm thời 5 phút (`ERR-03`, 429).
+### 9.3 Ký duyệt mã PIN Quản lý & Biên bản Z-Report (FR-09, DEC-02)
+- **Quy tắc ký duyệt Quản lý (`POST /api/v1/shifts/approve`)**:
+  - Chỉ cho phép duyệt ca đang ở trạng thái `CHO_DUYET` (đã qua bước kiểm đếm két của thu ngân). Từ chối duyệt trực tiếp ca `DANG_MO` hoặc ca đã đóng `DA_DONG` (HTTP 409).
+  - Xác thực trực tiếp mã PIN Quản lý qua `verifyManagerPin` (duy trì đếm lỗi và khóa 5 phút khi sai quá 5 lần theo DEC-02; không thể bỏ qua bằng cấu hình). Modal ký duyệt dùng lý do mặc định ("Ký duyệt chốt ca làm việc") và không bắt buộc nhập thêm lý do.
+  - Tuần tự hóa concurrency: `SELECT ... FOR UPDATE` bên trong transaction ngăn chặn race condition khi hai quản lý cùng duyệt 1 ca song song; chỉ đúng 1 yêu cầu thành công sinh Z-Report và audit log, yêu cầu còn lại bị từ chối 409.
 - **Khóa ca & Tính bất biến**:
   - Ca chuyển sang trạng thái `DA_DONG`. Khóa toàn bộ nghiệp vụ bán hàng hoặc void hóa đơn vào ca này.
   - Đăng xuất phiên làm việc của thu ngân (`pos_token` bị xóa khỏi cookie) để bàn giao phiên mới.
@@ -304,12 +309,14 @@ Hệ thống cung cấp quy trình kết ca làm việc 3 bước chuẩn F&B, k
 - **Nhật ký kiểm toán & Đo lường sự kiện**:
   - Ghi nhận `audit_logs` với hành động `CLOSE_SHIFT_APPROVE` kèm metadata sự kiện `ca_lam_viec_da_dong`: mã ca, nhân viên, độ lệch tiền, thời lượng ca và thông tin người duyệt.
 
-### 9.3 Hàng đợi Outbox & Thông báo Telegram (DEC-14, NFR-04)
+### 9.4 Hàng đợi Outbox & Thông báo Telegram (DEC-14, NFR-04)
 - **Bảng Outbox tổng quát (`outbox`)**:
   - Cấu trúc: `id`, `type`, `idempotency_key` (unique), `payload` (JSONB), `status` (`PENDING`/`SENT`/`FAILED`), `attempts`, `next_attempt_at`, `last_error`, `created_at`, `sent_at`.
   - Thiết kế tổng quát theo cột `type` để Phase 11 tái sử dụng cho đồng bộ đám mây offline-first.
+- **Cơ chế Claim chống gửi trùng**:
+  - `processOutbox` sử dụng `SELECT ... FOR UPDATE SKIP LOCKED` kết hợp lease time (60 giây) trong transaction để nhận batch bản ghi. Nhiều worker chạy đồng thời sẽ không bao giờ xử lý hay gửi trùng một tin nhắn Telegram.
 - **Thông báo Telegram Bot API**:
-  - Gửi tóm tắt tài chính ca làm việc vào nhóm Telegram quản lý thông qua biến môi trường `TELEGRAM_BOT_TOKEN` và `TELEGRAM_CHAT_ID`.
+  - Gửi tóm tắt tài chính ca làm việc vào nhóm Telegram quản lý dưới dạng Plain Text an toàn (không bị lỗi 400 khi tên/giải trình chứa ký tự Markdown đặc biệt như `*`, `_`, `[`).
   - Tuyệt đối bảo mật: Bot token chỉ lấy từ biến môi trường, không bao giờ được log hay trả về trong response/lỗi.
   - Cơ chế retry lũy thừa (exponential backoff, tối đa N lần). Thất bại gửi Telegram không chặn việc đóng ca và có thể kích hoạt xử lý lại qua endpoint `POST /api/v1/shifts/outbox` hoặc hàm `processOutbox()`.
 
