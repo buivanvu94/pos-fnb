@@ -4,6 +4,7 @@ import {
   formatVietqrTransferContent,
   generateVietQrString,
   formatTlv,
+  extractOrderCodeFromContent,
 } from "@/server/payments/vietqr-generator";
 
 describe("VietQR EMVCo & CRC16 Generator (FR-12, AC-08-1)", () => {
@@ -25,6 +26,14 @@ describe("VietQR EMVCo & CRC16 Generator (FR-12, AC-08-1)", () => {
     expect(formatVietqrTransferContent("Custom123")).toBe("CUSTOM123");
   });
 
+  it("extracts order code prioritizing HD\\d{4,} and avoids HDBANK false positives", () => {
+    expect(extractOrderCodeFromContent("Chuyen tien HD0012")).toBe("HD0012");
+    expect(extractOrderCodeFromContent("CK tu HDBANK HD0045")).toBe("HD0045");
+    expect(extractOrderCodeFromContent("Thanh toan HD-20261022-0089")).toBe("HD-20261022-0089");
+    expect(extractOrderCodeFromContent("Chuyen khoan qua HDBANK nhanh")).toBeNull();
+    expect(extractOrderCodeFromContent("HDBANK nap tien vao vi")).toBeNull();
+  });
+
   it("generates valid dynamic VietQR payload for AC-08-1 (150,000 VND, HD0012)", () => {
     const qrString = generateVietQrString({
       bankBin: "970422",
@@ -34,25 +43,16 @@ describe("VietQR EMVCo & CRC16 Generator (FR-12, AC-08-1)", () => {
       isDynamic: true,
     });
 
-    // Verify root tags
     expect(qrString.startsWith("000201010212")).toBe(true);
-    // Verify Napas GUID A000000727
     expect(qrString).toContain("0010A000000727");
-    // Verify Bank BIN & Account No
     expect(qrString).toContain("0006970422");
     expect(qrString).toContain("01100123456789");
-    // Verify currency 704 (VND)
     expect(qrString).toContain("5303704");
-    // Verify amount 150,000
     expect(qrString).toContain("5406150000");
-    // Verify country code VN
     expect(qrString).toContain("5802VN");
-    // Verify transfer content HD0012
     expect(qrString).toContain("62100806HD0012");
-    // Verify Tag 63 CRC
     expect(qrString).toContain("6304");
 
-    // Checksum verification
     const bodyBeforeCrc = qrString.slice(0, -4);
     const expectedCrc = qrString.slice(-4);
     expect(crc16Ccitt(bodyBeforeCrc)).toBe(expectedCrc);
@@ -66,7 +66,7 @@ describe("VietQR EMVCo & CRC16 Generator (FR-12, AC-08-1)", () => {
     });
 
     expect(qrString.startsWith("000201010211")).toBe(true);
-    expect(qrString).toContain("53037045802VN"); // Tag 58 directly follows Tag 53 without Tag 54 (amount)
+    expect(qrString).toContain("53037045802VN");
     const bodyBeforeCrc = qrString.slice(0, -4);
     const expectedCrc = qrString.slice(-4);
     expect(crc16Ccitt(bodyBeforeCrc)).toBe(expectedCrc);

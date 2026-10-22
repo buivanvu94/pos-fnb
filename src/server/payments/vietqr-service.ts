@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { orders, payments } from "@/db/schema";
 import { generateVietQrString, formatVietqrTransferContent } from "./vietqr-generator";
@@ -15,102 +15,109 @@ export async function createOrRefreshVietQrPayment(
 ): Promise<CreateVietQrPaymentResult> {
   const { orderId, expectedVersion, shiftId } = params;
 
-  // 1. Fetch order
-  const [order] = await db
-    .select()
-    .from(orders)
-    .where(eq(orders.id, orderId))
-    .limit(1);
+  return await db.transaction(async (tx) => {
+    // 1. Fetch and lock order for update (prevents race condition)
+    const [order] = await tx
+      .select()
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .limit(1)
+      .for("update");
 
-  if (!order) {
-    return { ok: false, status: 404, error: "Đơn hàng không tồn tại" };
-  }
+    if (!order) {
+      return { ok: false, status: 404, error: "Đơn hàng không tồn tại" };
+    }
 
-  if (order.status !== "DANG_PHUC_VU") {
-    if (order.status === "DA_THANH_TOAN") {
+    if (order.status !== "DANG_PHUC_VU") {
+      if (order.status === "DA_THANH_TOAN") {
+        return { ok: false, status: 409, error: "Hóa đơn này đã được thanh toán trước đó" };
+      }
+      return { ok: false, status: 409, error: "Trạng thái đơn hàng không hợp lệ để tạo mã VietQR" };
+    }
+
+    if (expectedVersion !== undefined && order.version !== expectedVersion) {
+      return { ok: false, status: 409, error: "Dữ liệu đơn hàng đã bị thay đổi bởi thao tác khác" };
+    }
+
+    if (order.finalAmount <= 0) {
+      return { ok: false, status: 400, error: "Tổng tiền thanh toán phải lớn hơn 0" };
+    }
+
+    // 2. Lock and verify existing payment
+    const [existingPayment] = await tx
+      .select()
+      .from(payments)
+      .where(and(eq(payments.orderId, orderId), eq(payments.paymentMethod, "VIETQR")))
+      .orderBy(payments.id)
+      .limit(1)
+      .for("update");
+
+    if (existingPayment && existingPayment.status === "SUCCESS") {
       return { ok: false, status: 409, error: "Hóa đơn này đã được thanh toán trước đó" };
     }
-    return { ok: false, status: 409, error: "Trạng thái đơn hàng không hợp lệ để tạo mã VietQR" };
-  }
 
-  if (expectedVersion !== undefined && order.version !== expectedVersion) {
-    return { ok: false, status: 409, error: "Dữ liệu đơn hàng đã bị thay đổi bởi thao tác khác" };
-  }
+    const bankBin = process.env.VIETQR_BANK_BIN || "970422";
+    const accountNo = process.env.VIETQR_ACCOUNT_NO || "0123456789";
+    const transferContent = formatVietqrTransferContent(order.orderCode);
 
-  if (order.finalAmount <= 0) {
-    return { ok: false, status: 400, error: "Tổng tiền thanh toán phải lớn hơn 0" };
-  }
-
-  const bankBin = process.env.VIETQR_BANK_BIN || "970422";
-  const accountNo = process.env.VIETQR_ACCOUNT_NO || "0123456789";
-  const transferContent = formatVietqrTransferContent(order.orderCode);
-
-  const qrContent = generateVietQrString({
-    bankBin,
-    accountNo,
-    amount: order.finalAmount,
-    transferContent,
-    isDynamic: true,
-  });
-
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + VIETQR_EXPIRY_SECONDS * 1000);
-
-  // 2. Find existing PENDING or EXPIRED payment for this order
-  const [existingPayment] = await db
-    .select()
-    .from(payments)
-    .where(and(eq(payments.orderId, orderId), eq(payments.paymentMethod, "VIETQR")))
-    .orderBy(payments.id)
-    .limit(1);
-
-  let paymentId: number;
-
-  if (existingPayment) {
-    await db
-      .update(payments)
-      .set({
-        amount: order.finalAmount,
-        qrContent,
-        vietqrRef: transferContent,
-        status: "PENDING",
-        expiresAt,
-        shiftId,
-      })
-      .where(eq(payments.id, existingPayment.id));
-    paymentId = existingPayment.id;
-  } else {
-    const [inserted] = await db
-      .insert(payments)
-      .values({
-        orderId: order.id,
-        shiftId,
-        paymentMethod: "VIETQR",
-        amount: order.finalAmount,
-        vietqrRef: transferContent,
-        qrContent,
-        status: "PENDING",
-        expiresAt,
-        createdAt: now,
-      })
-      .returning({ id: payments.id });
-    paymentId = inserted.id;
-  }
-
-  return {
-    ok: true,
-    status: 200,
-    data: {
-      paymentId,
-      orderId: order.id,
-      orderCode: order.orderCode,
-      transferContent,
+    const qrContent = generateVietQrString({
+      bankBin,
+      accountNo,
       amount: order.finalAmount,
-      qrContent,
-      expiresAt: expiresAt.toISOString(),
-      remainingSeconds: VIETQR_EXPIRY_SECONDS,
-    },
-  };
+      transferContent,
+      isDynamic: true,
+    });
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + VIETQR_EXPIRY_SECONDS * 1000);
+
+    let paymentId: number;
+    if (existingPayment) {
+      await tx
+        .update(payments)
+        .set({
+          amount: order.finalAmount,
+          qrContent,
+          vietqrRef: transferContent,
+          status: "PENDING",
+          expiresAt,
+          shiftId,
+        })
+        .where(and(eq(payments.id, existingPayment.id), ne(payments.status, "SUCCESS")));
+      paymentId = existingPayment.id;
+    } else {
+      const [inserted] = await tx
+        .insert(payments)
+        .values({
+          orderId: order.id,
+          shiftId,
+          paymentMethod: "VIETQR",
+          amount: order.finalAmount,
+          vietqrRef: transferContent,
+          qrContent,
+          status: "PENDING",
+          expiresAt,
+          createdAt: now,
+        })
+        .returning({ id: payments.id });
+      paymentId = inserted.id;
+    }
+
+    return {
+      ok: true,
+      status: 200,
+      data: {
+        paymentId,
+        orderId: order.id,
+        orderCode: order.orderCode,
+        transferContent,
+        amount: order.finalAmount,
+        qrContent,
+        expiresAt: expiresAt.toISOString(),
+        remainingSeconds: VIETQR_EXPIRY_SECONDS,
+      },
+    };
+  });
 }
 
 export async function getVietQrPaymentStatus(paymentId: number): Promise<VietQrStatusResult> {
@@ -139,13 +146,20 @@ export async function getVietQrPaymentStatus(paymentId: number): Promise<VietQrS
     remainingSeconds = Math.max(0, Math.floor(diffMs / 1000));
   }
 
-  // If still PENDING but expired time has passed -> transition to EXPIRED
+  // If still PENDING but expired time has passed -> transition to EXPIRED with atomic guard
   if (currentStatus === "PENDING" && remainingSeconds <= 0 && payment.expiresAt) {
-    currentStatus = "EXPIRED";
-    await db
+    const updated = await db
       .update(payments)
       .set({ status: "EXPIRED" })
-      .where(eq(payments.id, payment.id));
+      .where(and(eq(payments.id, payment.id), eq(payments.status, "PENDING")))
+      .returning({ status: payments.status });
+
+    if (updated.length > 0) {
+      currentStatus = "EXPIRED";
+    } else {
+      const [refreshed] = await db.select({ status: payments.status }).from(payments).where(eq(payments.id, payment.id));
+      if (refreshed) currentStatus = refreshed.status;
+    }
   }
 
   return {

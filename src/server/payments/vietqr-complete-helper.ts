@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, orderItems, tables, menuItems } from "@/db/schema";
+import { orders, orderItems, tables, menuItems, auditLogs } from "@/db/schema";
 import { TxAbortError } from "@/server/orders/tx-abort-error";
 import { generateNextQueueNumber } from "./queue-number-service";
 import { getPrinterSettings } from "@/server/printing/settings-service";
@@ -16,6 +16,12 @@ export interface CompleteVietQrPaymentTxParams {
   sepayTransactionId?: string;
   paymentId?: number;
   printPickupTicket?: boolean;
+  auditLog?: {
+    userId: number;
+    action: string;
+    reason: string;
+    metadata?: Record<string, unknown>;
+  };
 }
 
 export interface CompleteVietQrPaymentResult {
@@ -29,12 +35,12 @@ export interface CompleteVietQrPaymentResult {
 /**
  * Shared atomic transaction helper for completing VietQR payments (DEC-06, DEC-11, FR-12).
  * Reuses Phase 07 completion logic: locks order and table, frees table, generates queue number,
- * updates payment to SUCCESS, enqueues RECEIPT_FINAL (with cash drawer kick) and PICKUP_TICKET.
+ * updates payment to SUCCESS, writes audit logs inside tx, enqueues RECEIPT_FINAL and PICKUP_TICKET.
  */
 export async function executeVietQrPaymentCompletion(
   params: CompleteVietQrPaymentTxParams,
 ): Promise<CompleteVietQrPaymentResult> {
-  const { orderId, expectedVersion, shiftId, user, sepayTransactionId, paymentId, printPickupTicket } = params;
+  const { orderId, expectedVersion, shiftId, user, sepayTransactionId, paymentId, printPickupTicket, auditLog } = params;
   const settings = await getPrinterSettings();
 
   let createdReceiptJobId: number | undefined;
@@ -67,12 +73,7 @@ export async function executeVietQrPaymentCompletion(
 
       // 2. Lock table if dine-in
       if (order.tableId) {
-        await tx
-          .select({ id: tables.id })
-          .from(tables)
-          .where(eq(tables.id, order.tableId))
-          .limit(1)
-          .for("update");
+        await tx.select({ id: tables.id }).from(tables).where(eq(tables.id, order.tableId)).limit(1).for("update");
       }
 
       // 3. Verify active items
@@ -116,7 +117,19 @@ export async function executeVietQrPaymentCompletion(
         now,
       });
 
-      // 6. Enqueue print jobs (Receipt with drawer kick and Pickup ticket)
+      // 6. Write audit log atomically inside transaction if provided
+      if (auditLog) {
+        await tx.insert(auditLogs).values({
+          userId: auditLog.userId,
+          action: auditLog.action,
+          entityType: "ORDER",
+          entityId: String(order.id),
+          reason: auditLog.reason,
+          metadata: auditLog.metadata ? JSON.stringify(auditLog.metadata) : null,
+        });
+      }
+
+      // 7. Enqueue print jobs (Receipt with drawer kick and Pickup ticket)
       const enqueued = await enqueuePaymentPrintJobs(
         {
           order,

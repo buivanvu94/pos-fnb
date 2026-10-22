@@ -82,7 +82,8 @@ describe("Transaction-based Sequential Code Generator", () => {
   });
 
   it("correctly advances sequence past 99 to 100 without string sorting bugs", async () => {
-    const date = new Date("2026-10-22T05:00:00Z");
+    // Use an isolated date to test sequence 99 -> 100 without interference from today's orders
+    const date = new Date("2026-12-31T05:00:00Z");
     const ymd = formatYmdVietnam(date);
 
     await testDb.transaction(async (tx) => {

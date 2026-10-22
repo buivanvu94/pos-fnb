@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRole } from "@/server/auth/require-role";
 import { getVietQrPaymentStatus } from "@/server/payments/vietqr-service";
+import { isVietQrEnabled } from "@/server/payments/vietqr-config";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -12,6 +13,10 @@ interface RouteParams {
  * Transitions payment to EXPIRED when remainingSeconds reaches 0.
  */
 export async function GET(req: NextRequest, { params }: RouteParams) {
+  if (!isVietQrEnabled()) {
+    return NextResponse.json({ ok: false, error: "Tính năng thanh toán VietQR đang bị tắt" }, { status: 403 });
+  }
+
   const auth = await requireRole(req);
   if (!auth.authorized) {
     return auth.response;

@@ -38,18 +38,49 @@ export function formatVietqrTransferContent(orderCode: string): string {
 }
 
 /**
+ * Extracts compact or full order code from bank transfer message content.
+ * Prioritizes full code (HD-YYYYMMDD-XXXX), compact digits (HD0012),
+ * and boundary-checked codes while strictly excluding bank names like HDBANK.
+ */
+export function extractOrderCodeFromContent(content: string): string | null {
+  if (!content) return null;
+
+  // 1. Full order code: HD-YYYYMMDD-XXXX (e.g. HD-20261022-0012)
+  const fullMatch = content.match(/\b(HD-\d{8}-[A-Za-z0-9]+)\b/i);
+  if (fullMatch) {
+    return fullMatch[1].toUpperCase();
+  }
+
+  // 2. Compact code: HD followed by 2+ digits (e.g. HD0012, HD0001)
+  const compactDigitsMatch = content.match(/\b(HD\d{2,})\b/i);
+  if (compactDigitsMatch) {
+    return compactDigitsMatch[1].toUpperCase();
+  }
+
+  // 3. Codes with hyphen or underscore: HD-XXXX or HD_XXXX (e.g. HD_OVER_1, HD-0012)
+  const hyphenOrUnderscoreMatch = content.match(/\b(HD[-_][A-Za-z0-9_-]+)\b/i);
+  if (hyphenOrUnderscoreMatch) {
+    return hyphenOrUnderscoreMatch[1].toUpperCase();
+  }
+
+  // 4. Any alphanumeric code starting with HD (excluding HDBANK / HDB)
+  const genericMatch = content.match(/\b(?!HDBANK\b)(?!HDB\b)(HD[A-Za-z0-9]{2,})\b/i);
+  if (genericMatch) {
+    return genericMatch[1].toUpperCase();
+  }
+
+  return null;
+}
+
+/**
  * Generates an EMVCo compliant VietQR string (NAPAS247 standard, FR-12, AC-08-1).
  */
 export function generateVietQrString(options: VietQrGenerateOptions): string {
   const { bankBin, accountNo, amount, transferContent, isDynamic = true } = options;
 
-  // 1. Tag 00: Payload Format Indicator ("01")
   const tag00 = formatTlv("00", "01");
-
-  // 2. Tag 01: Point of Initiation Method ("12" = Dynamic, "11" = Static)
   const tag01 = formatTlv("01", isDynamic ? "12" : "11");
 
-  // 3. Tag 38: Merchant Account Information (NAPAS247 VietQR)
   const sub38_00 = formatTlv("00", "A000000727"); // GUID NAPAS
   const sub38_01_00 = formatTlv("00", bankBin.trim());
   const sub38_01_01 = formatTlv("01", accountNo.trim());
@@ -57,26 +88,21 @@ export function generateVietQrString(options: VietQrGenerateOptions): string {
   const sub38_02 = formatTlv("02", "QRIBFTTA"); // Fast transfer to Account
   const tag38 = formatTlv("38", sub38_00 + sub38_01 + sub38_02);
 
-  // 4. Tag 53: Transaction Currency ("704" for VND)
   const tag53 = formatTlv("53", "704");
 
-  // 5. Tag 54: Transaction Amount (if specified and > 0)
   let tag54 = "";
   if (amount !== undefined && amount > 0) {
     tag54 = formatTlv("54", Math.round(amount).toString());
   }
 
-  // 6. Tag 58: Country Code ("VN")
   const tag58 = formatTlv("58", "VN");
 
-  // 7. Tag 62: Additional Data Field Template (transfer content / purpose)
   let tag62 = "";
   if (transferContent && transferContent.trim().length > 0) {
     const sub62_08 = formatTlv("08", transferContent.trim());
     tag62 = formatTlv("62", sub62_08);
   }
 
-  // 8. Tag 63: CRC16 Checksum
   const payloadBeforeCrc = `${tag00}${tag01}${tag38}${tag53}${tag54}${tag58}${tag62}6304`;
   const checksum = crc16Ccitt(payloadBeforeCrc);
 

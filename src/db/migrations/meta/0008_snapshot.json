@@ -1,5 +1,5 @@
 {
-  "id": "83d342d6-0fb0-4063-9322-fce0e464ce9d",
+  "id": "993347a8-bb1e-41a6-a40f-b18e8b8326d9",
   "prevId": "4a1a6dd7-dfbb-4510-a53b-8562e9522c06",
   "version": "7",
   "dialect": "postgresql",
@@ -1675,8 +1675,8 @@
         }
       },
       "indexes": {
-        "unmatched_tx_gateway_id_idx": {
-          "name": "unmatched_tx_gateway_id_idx",
+        "unmatched_tx_gateway_id_unique": {
+          "name": "unmatched_tx_gateway_id_unique",
           "columns": [
             {
               "expression": "gateway_transaction_id",
@@ -1685,7 +1685,7 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

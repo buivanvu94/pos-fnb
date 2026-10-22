@@ -21,6 +21,7 @@ export function VietQrManualModal({
   onSuccess,
 }: VietQrManualModalProps) {
   const { message } = App.useApp();
+  const [pin, setPin] = useState("");
   const [reason, setReason] = useState("");
   const [confirming, setConfirming] = useState(false);
 
@@ -37,6 +38,7 @@ export function VietQrManualModal({
         body: JSON.stringify({
           orderId,
           expectedVersion,
+          pin: pin.trim(),
           reason: reason.trim(),
           printPickupTicket,
         }),
@@ -44,6 +46,8 @@ export function VietQrManualModal({
       const data = await res.json();
       if (data.ok) {
         message.success("Đã xác nhận thanh toán thủ công thành công");
+        setPin("");
+        setReason("");
         onClose();
         onSuccess(data);
       } else {
@@ -66,10 +70,17 @@ export function VietQrManualModal({
       okText="Xác nhận đã nhận tiền"
       cancelText="Đóng"
     >
-      <p>
+      <p style={{ marginBottom: 12 }}>
         Thao tác này chỉ dùng khi mất mạng Internet hoặc webhook SePay chậm trễ.
-        Hành động sẽ được ghi nhận vào nhật ký kiểm toán (audit log).
+        Yêu cầu mã PIN Quản lý và lý do tối thiểu 5 ký tự để ghi nhật ký kiểm toán.
       </p>
+      <Input.Password
+        placeholder="Mã PIN Quản lý phê duyệt (4-6 chữ số)"
+        maxLength={6}
+        value={pin}
+        onChange={(e) => setPin(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
       <Input.TextArea
         rows={3}
         placeholder="Nhập lý do xác nhận thủ công (tối thiểu 5 ký tự)..."

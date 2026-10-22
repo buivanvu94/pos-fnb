@@ -1,44 +1,19 @@
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, payments, unmatchedTransactions } from "@/db/schema";
+import { payments, unmatchedTransactions } from "@/db/schema";
 import { executeVietQrPaymentCompletion } from "./vietqr-complete-helper";
-import { formatVietqrTransferContent } from "./vietqr-generator";
+import { extractOrderCodeFromContent } from "./vietqr-generator";
+import { verifySepayWebhookAuth } from "./sepay-auth-helper";
+import { logUnmatchedTransaction } from "./sepay-unmatched-helper";
+import { matchOrderAndPayment } from "./sepay-matcher-helper";
 import type { SepayWebhookPayload } from "./vietqr-types";
 
-/**
- * Validates SePay webhook API key or secret token against environment configuration.
- */
-export function verifySepayWebhookAuth(authHeader: string | null, xApiKey: string | null): boolean {
-  const configuredApiKey = process.env.SEPAY_API_KEY;
-  const configuredSecret = process.env.SEPAY_WEBHOOK_SECRET;
-
-  // In test environment or unconfigured placeholder, permit when explicit match
-  const validTokens = [configuredApiKey, configuredSecret].filter(Boolean);
-  if (validTokens.length === 0) {
-    return true; // No secret configured in dev mode
-  }
-
-  const checkValue = (token: string | null | undefined): boolean => {
-    if (!token) return false;
-    const cleanToken = token.replace(/^(Apikey|Bearer)\s+/i, "").trim();
-    return validTokens.includes(cleanToken) || validTokens.includes(token.trim());
-  };
-
-  return checkValue(authHeader) || checkValue(xApiKey);
-}
-
-/**
- * Extracts compact or full order code from bank transfer message content.
- */
-export function extractOrderCodeFromContent(content: string): string | null {
-  if (!content) return null;
-  const match = content.match(/(HD-?\d{8}-[A-Za-z0-9]+|HD-?[A-Za-z0-9]{2,20})/i);
-  return match ? match[1].toUpperCase() : null;
-}
+export { verifySepayWebhookAuth, extractOrderCodeFromContent };
 
 export interface ProcessSepayWebhookResult {
   ok: boolean;
   status?: number;
+  success?: boolean;
   message?: string;
   error?: string;
   unmatched?: boolean;
@@ -49,8 +24,7 @@ export interface ProcessSepayWebhookResult {
 
 /**
  * Processes incoming SePay bank transfer webhook (DEC-06, FR-12).
- * Fully idempotent by gateway transaction ID.
- * Unmatched or deficient transactions are durably logged to unmatched_transactions.
+ * Fully idempotent, resilient to cross-day order collisions, and always returns HTTP 200 { success: true }.
  */
 export async function processSepayWebhook(payload: SepayWebhookPayload): Promise<ProcessSepayWebhookResult> {
   const gatewayTxId = String(payload.id);
@@ -58,94 +32,62 @@ export async function processSepayWebhook(payload: SepayWebhookPayload): Promise
   const content = payload.content || payload.description || "";
   const transferType = (payload.transferType || "in").toUpperCase();
 
-  // 1. Idempotency Check: if already processed successfully, return OK immediately
-  const [existingSuccess] = await db
-    .select({ id: payments.id, status: payments.status })
+  // 1. Idempotency Check: check BOTH payments.sepay_transaction_id and unmatched_transactions
+  const [existingPayment] = await db
+    .select({ id: payments.id })
     .from(payments)
     .where(and(eq(payments.sepayTransactionId, gatewayTxId), eq(payments.status, "SUCCESS")))
     .limit(1);
 
-  if (existingSuccess) {
-    return { ok: true, status: 200, message: "Giao dịch đã được xử lý trước đó", idempotent: true };
+  if (existingPayment) {
+    return { ok: true, status: 200, success: true, message: "Giao dịch đã được xử lý trước đó", idempotent: true };
   }
 
-  // Only handle incoming transfers
+  const [existingUnmatched] = await db
+    .select({ id: unmatchedTransactions.id })
+    .from(unmatchedTransactions)
+    .where(eq(unmatchedTransactions.gatewayTransactionId, gatewayTxId))
+    .limit(1);
+
+  if (existingUnmatched) {
+    return { ok: true, status: 200, success: true, message: "Giao dịch đã được ghi nhận trước đó", idempotent: true };
+  }
+
   if (transferType !== "IN") {
-    return { ok: true, status: 200, message: "Bỏ qua giao dịch không phải tiền vào" };
+    return { ok: true, status: 200, success: true, message: "Bỏ qua giao dịch không phải tiền vào" };
   }
 
-  // 2. Extract order code
+  // 2. Candidate matching & validation
   const extractedCode = extractOrderCodeFromContent(content);
-  let matchedOrder: typeof orders.$inferSelect | undefined;
-  let matchedPayment: typeof payments.$inferSelect | undefined;
+  const matchResult = await matchOrderAndPayment(extractedCode, transferAmount);
 
-  if (extractedCode) {
-    const compactCode = formatVietqrTransferContent(extractedCode);
-
-    // Try finding pending or expired payment with this ref
-    const [p] = await db
-      .select()
-      .from(payments)
-      .where(and(eq(payments.vietqrRef, compactCode), eq(payments.paymentMethod, "VIETQR")))
-      .orderBy(payments.id)
-      .limit(1);
-
-    if (p) {
-      matchedPayment = p;
-      const [o] = await db.select().from(orders).where(eq(orders.id, p.orderId)).limit(1);
-      matchedOrder = o;
-    } else {
-      // Find order by code directly
-      const [o] = await db
-        .select()
-        .from(orders)
-        .where(
-          sql`UPPER(${orders.orderCode}) = ${extractedCode} OR UPPER(${orders.orderCode}) LIKE ${'%' + extractedCode.replace(/^HD-?/, '')}`,
-        )
-        .limit(1);
-      matchedOrder = o;
-    }
-  }
-
-  // 3. Handle unmatched or deficient scenarios
-  let unmatchedReason: string | null = null;
-
-  if (!matchedOrder) {
-    unmatchedReason = "Không tìm thấy hóa đơn phù hợp với nội dung chuyển khoản";
-  } else if (matchedOrder.status !== "DANG_PHUC_VU") {
-    unmatchedReason = `Hóa đơn ${matchedOrder.orderCode} ở trạng thái ${matchedOrder.status}, không thể tự động thanh toán`;
-  } else if (transferAmount < matchedOrder.finalAmount) {
-    unmatchedReason = `Số tiền không đủ (chuyển ${transferAmount.toLocaleString("vi-VN")} đ, cần ${matchedOrder.finalAmount.toLocaleString("vi-VN")} đ)`;
-  }
-
-  if (unmatchedReason) {
-    await db.insert(unmatchedTransactions).values({
-      gateway: (payload.gateway || "SEPAY").slice(0, 50),
-      gatewayTransactionId: gatewayTxId,
+  if (matchResult.error) {
+    await logUnmatchedTransaction({
+      payload,
+      gatewayTxId,
       amount: transferAmount,
-      content: content.slice(0, 255),
-      transferType: "IN",
-      orderCode: matchedOrder?.orderCode || extractedCode || null,
-      orderId: matchedOrder?.id || null,
-      reason: unmatchedReason,
-      rawPayload: JSON.stringify(payload),
-      status: "UNRESOLVED",
+      content,
+      orderCode: matchResult.matchedOrder?.orderCode || extractedCode || null,
+      orderId: matchResult.matchedOrder?.id || null,
+      reason: matchResult.error,
     });
 
     return {
-      ok: false,
-      status: 200, // Return 200 to acknowledge webhook receipt while flagging unmatched
+      ok: true,
+      status: 200,
+      success: true,
       unmatched: true,
-      error: unmatchedReason,
+      error: matchResult.error,
     };
   }
 
-  // 4. Complete payment and order atomically
+  // 3. Complete payment atomically with race condition handling
+  const { matchedOrder, matchedPayment, creatorUser } = matchResult;
   const systemUser = {
-    userId: matchedOrder!.createdById || 1,
-    username: "sepay_webhook",
-    role: "THU_NGAN" as const,
-    fullName: "Cổng SePay Tự Động",
+    userId: creatorUser!.id,
+    username: creatorUser!.username,
+    role: creatorUser!.role as "QUAN_LY" | "THU_NGAN" | "PHUC_VU",
+    fullName: creatorUser!.fullName,
   };
 
   const result = await executeVietQrPaymentCompletion({
@@ -156,5 +98,33 @@ export async function processSepayWebhook(payload: SepayWebhookPayload): Promise
     paymentId: matchedPayment?.id,
   });
 
-  return result;
+  if (!result.ok) {
+    // If order was already paid by cash, voided, or cancelled, log to unmatched
+    const raceReason = `Thanh toán thất bại do xung đột (${result.error || "Đơn hàng đã thanh toán hoặc đã hủy"})`;
+    await logUnmatchedTransaction({
+      payload,
+      gatewayTxId,
+      amount: transferAmount,
+      content,
+      orderCode: matchedOrder!.orderCode,
+      orderId: matchedOrder!.id,
+      reason: raceReason,
+    });
+
+    return {
+      ok: true,
+      status: 200,
+      success: true,
+      unmatched: true,
+      error: raceReason,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    success: true,
+    data: result.data,
+    printWarning: result.printWarning,
+  };
 }

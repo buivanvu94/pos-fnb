@@ -22,7 +22,7 @@ ALTER TABLE "payments" ADD COLUMN "sepay_transaction_id" varchar(100);--> statem
 ALTER TABLE "payments" ADD COLUMN "expires_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "unmatched_transactions" ADD CONSTRAINT "unmatched_transactions_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unmatched_transactions" ADD CONSTRAINT "unmatched_transactions_resolved_by_id_users_id_fk" FOREIGN KEY ("resolved_by_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "unmatched_tx_gateway_id_idx" ON "unmatched_transactions" USING btree ("gateway_transaction_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "unmatched_tx_gateway_id_unique" ON "unmatched_transactions" USING btree ("gateway_transaction_id");--> statement-breakpoint
 CREATE INDEX "unmatched_tx_order_code_idx" ON "unmatched_transactions" USING btree ("order_code");--> statement-breakpoint
 CREATE INDEX "unmatched_tx_order_id_idx" ON "unmatched_transactions" USING btree ("order_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "payments_sepay_tx_unique" ON "payments" USING btree ("sepay_transaction_id") WHERE sepay_transaction_id IS NOT NULL;--> statement-breakpoint

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireOpenShift } from "@/server/shifts/require-open-shift";
 import { can } from "@/lib/permissions";
 import { createOrRefreshVietQrPayment } from "@/server/payments/vietqr-service";
+import { isVietQrEnabled } from "@/server/payments/vietqr-config";
 import { db } from "@/db";
 import { orders } from "@/db/schema";
 import { eq } from "drizzle-orm";
@@ -19,6 +20,10 @@ const createVietQrSchema = z.object({
  * Creates or refreshes a dynamic VietQR payment with 180s expiry (API-05, FR-12, AC-08-1).
  */
 export async function POST(req: NextRequest) {
+  if (!isVietQrEnabled()) {
+    return NextResponse.json({ ok: false, error: "Tính năng thanh toán VietQR đang bị tắt" }, { status: 403 });
+  }
+
   const shiftAuth = await requireOpenShift(req);
   if (!shiftAuth.authorized) {
     return shiftAuth.response;

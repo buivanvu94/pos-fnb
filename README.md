@@ -256,16 +256,17 @@ Hệ thống tích hợp thanh toán VietQR động chuẩn EMVCo và cổng Web
 - **Endpoint Polling**: `GET /api/v1/payments/:id` hỗ trợ frontend kiểm tra định kỳ trạng thái thanh toán, tự động chuyển trạng thái bản ghi sang `EXPIRED` khi hết thời gian mà chưa có tiền về.
 
 ### 8.3 Webhook SePay & Đối soát tự động (AC-08-1, BR-11)
-- **Xác thực an toàn**: API `POST /api/v1/webhooks/sepay` kiểm tra xác thực khóa bí mật qua tiêu đề `Authorization: Apikey <SEPAY_WEBHOOK_SECRET>`.
-- **Tính Idempotent**: Khóa giao dịch dựa trên mã định danh giao dịch duy nhất từ SePay (`sepay_transaction_id`). Các webhook gửi lặp lại sẽ được bỏ qua an toàn mà không nhân đôi nghiệp vụ.
+- **Xác thực an toàn & Fail-closed**: API `POST /api/v1/webhooks/sepay` so sánh khóa bảo mật bằng giải thuật thời gian hằng số `crypto.timingSafeEqual` (băm SHA-256) chống rò rỉ độ dài token. Tự động từ chối (401) nếu chưa cấu hình secret trong biến môi trường.
+- **Tính Idempotent toàn diện**: Đảm bảo duy nhất qua chỉ mục `uniqueIndex` trên `unmatched_transactions(gateway_transaction_id)` và `payments(sepay_transaction_id)`. Hai webhook đồng thời cùng mã giao dịch chỉ hoàn tất 1 lần và đều phản hồi HTTP 200 `{ success: true }`.
 - **Đối soát khớp**:
-  - Tự động bóc tách mã đơn hàng từ nội dung chuyển khoản và so khớp số tiền thực nhận với `final_amount`.
-  - Nếu khớp: Thực thi chung logic hoàn tất thanh toán của Phase 07 (`DA_THANH_TOAN`, cấp số thứ tự lấy đồ `queue_number`, kích mở két tiền `RJ12`, in hóa đơn, mở bàn).
-  - Đối soát tiền về sau 180s: Trường hợp tiền chuyển về muộn sau khi mã QR đã hết hạn (`EXPIRED`), hệ thống vẫn tự động so khớp và hoàn tất đơn hàng thành công.
+  - Tự động bóc tách mã đơn hàng từ nội dung chuyển khoản (ưu tiên `HD\d{4,}` để tránh nhận nhầm chuỗi tên ngân hàng như `HDBANK`), chỉ khớp các đơn đang ở trạng thái `DANG_PHUC_VU` kèm giao dịch `PENDING` hoặc `EXPIRED`. Nếu phát hiện nhiều hơn 1 đơn hàng trùng mã sẽ chuyển sang ghi nhận đối soát thủ công.
+  - Nếu khớp: Kiểm tra ca làm việc đang mở (`DANG_MO`), số tiền khớp chính xác (`transferAmount == finalAmount`), hoàn tất đơn hàng (`DA_THANH_TOAN`), cấp số thứ tự `queue_number`, kích mở két tiền `RJ12`, in hóa đơn và mở bàn.
+  - Xử lý xung đột (Race condition): Nếu đơn hàng vừa được thu ngân thanh toán tiền mặt hoặc hủy ngay trước khi webhook tới, hệ thống tự động ghi nhận vào `unmatched_transactions` với lý do rõ ràng mà không làm mất vết tiền về.
 - **Xử lý sai lệch (Unmatched Transactions)**:
-  - Trường hợp thiếu tiền hoặc nội dung chuyển khoản không tìm thấy đơn hàng tương ứng: Hệ thống tự động ghi nhận vào bảng `unmatched_transactions` với trạng thái `PENDING_REVIEW` để quản lý kiểm tra đối soát thủ công.
+  - Cả trường hợp thiếu tiền và thừa tiền (`transferAmount > finalAmount`), ca làm việc đã đóng, hoặc không tìm thấy đơn hàng đều được lưu trữ nguyên vẹn số tiền thực nhận vào bảng `unmatched_transactions`.
+  - Phản hồi HTTP 200 `{ success: true, unmatched: true }` giúp SePay xác nhận đã gửi webhook thành công và không thử lại liên tục.
 
 ### 8.4 Xác nhận thủ công dự phòng & Cờ tính năng
-- **Xác nhận thủ công dự phòng**: Cung cấp nút và Modal "Xác nhận đã nhận tiền (Dự phòng)" (`POST /api/v1/payments/vietqr/manual-confirm`) có ghi nhận nhật ký kiểm toán `audit_logs` (`action: "MANUAL_VIETQR_CONFIRM"`) và bắt buộc nhập lý do tối thiểu 5 ký tự khi hệ thống SePay gặp sự cố mạng.
-- **Cờ cấu hình tắt/mở**: Biến môi trường `VIETQR_ENABLED` và `NEXT_PUBLIC_VIETQR_ENABLED` cho phép ẩn hoàn toàn tab thanh toán VietQR trên giao diện POS khi quán chỉ sử dụng tiền mặt.
+- **Xác nhận thủ công dự phòng**: Cung cấp nút và Modal "Xác nhận đã nhận tiền (Dự phòng)" (`POST /api/v1/payments/vietqr/manual-confirm`) qua cổng phê duyệt mã PIN Quản lý `withManagerApproval` (Phase 06), bắt buộc nhập lý do tối thiểu 5 ký tự và ghi nhật ký kiểm toán `audit_logs` (`action: "MANUAL_VIETQR_CONFIRM"`) trong cùng database transaction hoàn tất đơn hàng (rollback nếu ghi audit lỗi).
+- **Cờ cấu hình thống nhất**: Biến môi trường `VIETQR_ENABLED` kiểm soát chặt chẽ phía server (từ chối 403 khi tắt) và `NEXT_PUBLIC_VIETQR_ENABLED` hỗ trợ ẩn tab trên giao diện POS khi quán chỉ sử dụng tiền mặt.
 

@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, timestamp, text, index } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, integer, timestamp, text, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { orders } from "./orders-payments";
 import { users } from "./users";
 
@@ -26,7 +26,7 @@ export const unmatchedTransactions = pgTable(
     resolutionNotes: varchar("resolution_notes", { length: 255 }),
   },
   (table) => [
-    index("unmatched_tx_gateway_id_idx").on(table.gatewayTransactionId),
+    uniqueIndex("unmatched_tx_gateway_id_unique").on(table.gatewayTransactionId),
     index("unmatched_tx_order_code_idx").on(table.orderCode),
     index("unmatched_tx_order_id_idx").on(table.orderId),
   ],
