@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Segmented, Row, Col, Card, Tag, Typography, Button, Space, Empty } from "antd";
-import { PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { PlusOutlined, SettingOutlined, CoffeeOutlined } from "@ant-design/icons";
 import { formatVnd } from "@/lib/money";
 
 const { Text, Title } = Typography;
@@ -81,6 +81,24 @@ export function MenuGrid({
               <Col xs={12} sm={8} md={6} lg={4} key={item.id}>
                 <Card
                   hoverable={!isOutOfStock}
+                  cover={
+                    item.imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.imageUrl}
+                        alt={item.name}
+                        loading="lazy"
+                        style={{ width: "100%", aspectRatio: "1 / 1", objectFit: "cover", filter: isOutOfStock ? "grayscale(1)" : undefined }}
+                      />
+                    ) : (
+                      <div
+                        aria-hidden
+                        style={{ width: "100%", aspectRatio: "1 / 1", display: "flex", alignItems: "center", justifyContent: "center", background: "#fafafa", color: "#bfbfbf", fontSize: 32 }}
+                      >
+                        <CoffeeOutlined />
+                      </div>
+                    )
+                  }
                   onClick={() => !isOutOfStock && onQuickAddItem(item)}
                   style={{
                     borderRadius: 8,
@@ -119,6 +137,7 @@ export function MenuGrid({
                     <Space size={4}>
                       <Button
                         size="small"
+                        aria-label={`Tùy chỉnh ${item.name}`}
                         icon={<SettingOutlined />}
                         disabled={isOutOfStock || loading}
                         onClick={(e) => {
@@ -129,6 +148,7 @@ export function MenuGrid({
                       <Button
                         type="primary"
                         size="small"
+                        aria-label={`Thêm ${item.name}`}
                         icon={<PlusOutlined />}
                         disabled={isOutOfStock || loading}
                         onClick={(e) => {

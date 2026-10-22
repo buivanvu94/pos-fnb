@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Tabs, Row, Col, Empty, Card } from "antd";
+import { AppstoreOutlined, EnvironmentOutlined } from "@ant-design/icons";
 import { TableCard } from "./table-card";
 import type { TableWithOrderInfo } from "@/server/tables/table-service";
 
@@ -39,12 +40,14 @@ export function TableGrid({ tables, selectedTableId, onSelectTable }: TableGridP
     const list = [
       {
         key: "all",
+        icon: <AppstoreOutlined />,
         label: `Tất cả (${tables.length})`,
       },
       ...areas.map((a) => {
         const count = tables.filter((t) => t.areaId === a.id).length;
         return {
           key: String(a.id),
+          icon: <EnvironmentOutlined />,
           label: `${a.name} (${count})`,
         };
       }),
