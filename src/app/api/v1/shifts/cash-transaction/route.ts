@@ -6,6 +6,7 @@ import { requireRole } from "@/server/auth/require-role";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { getShiftCashBalance } from "@/server/shifts/cash-balance";
 import { dispatchPrintJob } from "@/server/printing/print-service";
+import { recordSyncCashTxnEvent } from "@/server/sync";
 
 const MAX_MONEY = 2_000_000_000;
 
@@ -145,6 +146,20 @@ export async function POST(req: NextRequest) {
           performedBy: user.userId,
         })
         .returning();
+
+      // a2. Enqueue cloud sync cash transaction event in same tx
+      await recordSyncCashTxnEvent(
+        {
+          id: entry.id,
+          shiftId: entry.shiftId,
+          entryType: entry.entryType as "THU" | "CHI",
+          amount: entry.amount,
+          reason: entry.reason,
+          performedBy: entry.performedBy,
+          createdAt: entry.createdAt.toISOString(),
+        },
+        tx as any,
+      );
 
       // b. Queue print job for thermal printer & cash drawer kick
       const [job] = await tx

@@ -9,6 +9,7 @@ import { PUT as updatePinHandler } from "@/app/api/v1/users/me/pin/route";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { verifyManagerPin } from "@/server/approvals/pin-service";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 
 describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
   const testDbUrl = getTestDbUrl();
@@ -25,9 +26,10 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
   let cashierToken: string;
 
   const CURRENT_PASSWORD = "Password123!";
-  const INITIAL_PIN = "7410";
-  const NEW_PIN = "6382";
-  const OTHER_MANAGER_PIN = "9264";
+  const INITIAL_PIN = generateSafeTestPin();
+  const NEW_PIN = generateSafeTestPin();
+  const OTHER_MANAGER_PIN = generateSafeTestPin();
+  const DUMMY_VALID_PIN = generateSafeTestPin();
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: testDbUrl });
@@ -89,6 +91,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
 
   afterAll(async () => {
     if (db) {
+      await clearManagerPinHash(db, [managerId, otherManagerId]);
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.entityType, "users"));
       await db.delete(schema.users).where(eq(schema.users.id, cashierId));
       await db.delete(schema.users).where(eq(schema.users.id, otherManagerId));
@@ -196,7 +199,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
         },
         body: JSON.stringify({
           currentPassword: "WrongPassword!",
-          newPin: "8391",
+          newPin: DUMMY_VALID_PIN,
         }),
       });
       const res = await updatePinHandler(req);
@@ -212,7 +215,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
       },
       body: JSON.stringify({
         currentPassword: "WrongPassword!",
-        newPin: "8391",
+        newPin: DUMMY_VALID_PIN,
       }),
     });
     const lockRes = await updatePinHandler(lockReq);
@@ -298,7 +301,7 @@ describe("Manager PIN Management API - PUT /api/v1/users/me/pin", () => {
       },
       body: JSON.stringify({
         currentPassword: CURRENT_PASSWORD,
-        newPin: "8391",
+        newPin: DUMMY_VALID_PIN,
       }),
     });
 

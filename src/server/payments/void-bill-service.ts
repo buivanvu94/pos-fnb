@@ -4,6 +4,7 @@ import { orders, payments, shifts } from "@/db/schema";
 import { TxAbortError } from "@/server/orders/tx-abort-error";
 import { withManagerApproval } from "@/server/approvals/with-manager-approval";
 import { logAudit } from "@/server/approvals/audit-log-service";
+import { recordSyncInvoiceEvent } from "@/server/sync";
 import type { TokenPayload } from "@/server/auth/jwt";
 
 export interface VoidBillParams {
@@ -147,6 +148,27 @@ export async function voidPaidBill(params: VoidBillParams): Promise<VoidBillResu
           status: "VOIDED",
         })
         .where(eq(payments.orderId, orderId));
+
+      // Enqueue cloud sync invoice void event in same tx
+      await recordSyncInvoiceEvent(
+        {
+          orderId: lockedOrder.id,
+          orderCode: lockedOrder.orderCode,
+          orderType: lockedOrder.orderType,
+          status: "DA_HUY",
+          totalAmount: lockedOrder.totalAmount,
+          discountAmount: lockedOrder.discountAmount,
+          finalAmount: lockedOrder.finalAmount,
+          paymentMethod: lockedOrder.paymentMethod,
+          paidAt: lockedOrder.paidAt ? lockedOrder.paidAt.toISOString() : null,
+          voidedAt: now.toISOString(),
+          voidReason: approval.reason,
+          queueNumber: lockedOrder.queueNumber,
+          shiftId: payment?.shiftId ?? null,
+          version: nextVersion,
+        },
+        tx as any,
+      );
 
       // Persist audit log
       await logAudit(

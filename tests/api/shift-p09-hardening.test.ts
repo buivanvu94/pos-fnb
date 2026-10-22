@@ -6,6 +6,7 @@ import { eq, and } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { POST as approveShiftHandler } from "@/app/api/v1/shifts/approve/route";
 import { POST as closeShiftHandler } from "@/app/api/v1/shifts/close/route";
@@ -23,7 +24,7 @@ describe("Phase 09 Reviewer Hardening Tests (Reviewer Kongming)", () => {
   let cashierToken: string;
   let managerUserId: number;
   let managerToken: string;
-  const managerPin = "7788";
+  const managerPin = generateSafeTestPin();
 
   let testAreaId: number;
   let testTableId: number;
@@ -78,6 +79,9 @@ describe("Phase 09 Reviewer Hardening Tests (Reviewer Kongming)", () => {
   });
 
   afterAll(async () => {
+    if (db) {
+      await clearManagerPinHash(db, managerUserId);
+    }
     await pool.end();
   });
 

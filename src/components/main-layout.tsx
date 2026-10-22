@@ -17,6 +17,7 @@ import { useRouter, usePathname } from "next/navigation";
 import dayjs from "dayjs";
 import type { Role } from "@/lib/permissions";
 import { ShiftToolbar } from "@/components/shift/shift-toolbar";
+import { SyncStatusBadge } from "@/components/sync/sync-status-badge";
 
 const { Header, Content } = Layout;
 const { Text } = Typography;
@@ -171,6 +172,7 @@ export function MainLayout({ children }: MainLayoutProps) {
             </Dropdown>
           )}
 
+          <SyncStatusBadge />
           <ShiftToolbar />
         </Space>
       </Header>

@@ -6,6 +6,8 @@ import { generateNextQueueNumber } from "./queue-number-service";
 import { getPrinterSettings } from "@/server/printing/settings-service";
 import { enqueuePaymentPrintJobs, dispatchPaymentPrintJobs } from "./cash-payment-print-helper";
 import { updateVietQrOrderAndPayment } from "./vietqr-update-records";
+import { recordSyncInvoiceEvent } from "@/server/sync";
+import { logAudit } from "@/server/approvals/audit-log-service";
 import type { TokenPayload } from "@/server/auth/jwt";
 
 export interface CompleteVietQrPaymentTxParams {
@@ -129,16 +131,40 @@ export async function executeVietQrPaymentCompletion(
         now,
       });
 
+      // 5b. Enqueue cloud sync invoice event in same tx
+      await recordSyncInvoiceEvent(
+        {
+          orderId: order.id,
+          orderCode: order.orderCode,
+          orderType: order.orderType,
+          status: "DA_THANH_TOAN",
+          totalAmount: order.totalAmount,
+          discountAmount: order.discountAmount,
+          finalAmount: order.finalAmount,
+          paymentMethod: "VIETQR",
+          paidAt: now.toISOString(),
+          voidedAt: null,
+          voidReason: null,
+          queueNumber,
+          shiftId,
+          version: order.version + 1,
+        },
+        tx as any,
+      );
+
       // 6. Write audit log atomically inside transaction if provided
       if (auditLog) {
-        await tx.insert(auditLogs).values({
-          userId: auditLog.userId,
-          action: auditLog.action,
-          entityType: "ORDER",
-          entityId: String(order.id),
-          reason: auditLog.reason,
-          metadata: auditLog.metadata ? JSON.stringify(auditLog.metadata) : null,
-        });
+        await logAudit(
+          {
+            userId: auditLog.userId,
+            action: auditLog.action,
+            entityType: "ORDER",
+            entityId: order.id,
+            reason: auditLog.reason,
+            metadata: auditLog.metadata,
+          },
+          tx as any,
+        );
       }
 
       // 7. Enqueue print jobs (Receipt with drawer kick and Pickup ticket)

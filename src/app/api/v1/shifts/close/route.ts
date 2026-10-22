@@ -6,6 +6,7 @@ import { requireRole } from "@/server/auth/require-role";
 import { ERROR_CATALOG, formatErr04, formatErr05 } from "@/lib/error-catalog";
 import { getShiftCashBalance } from "@/server/shifts/cash-balance";
 import { countUnpaidTables } from "@/server/shifts/shift-tables-check";
+import { recordSyncShiftEvent } from "@/server/sync";
 
 const MAX_MONEY = 2_000_000_000;
 
@@ -149,6 +150,24 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(shifts.id, activeShift.id))
         .returning();
+
+      await recordSyncShiftEvent(
+        {
+          shiftId: updatedShift.id,
+          shiftCode: updatedShift.shiftCode,
+          cashierId: updatedShift.cashierId,
+          initialCash: updatedShift.initialCash,
+          actualCash: updatedShift.actualCash,
+          expectedCash: updatedShift.expectedCash,
+          difference: updatedShift.difference,
+          explanation: updatedShift.explanation,
+          status: updatedShift.status,
+          openedAt: updatedShift.openedAt.toISOString(),
+          closedAt: updatedShift.closedAt ? updatedShift.closedAt.toISOString() : null,
+          approvedById: null,
+        },
+        tx as any,
+      );
 
       return {
         ok: true,

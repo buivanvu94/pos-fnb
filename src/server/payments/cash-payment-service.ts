@@ -5,6 +5,7 @@ import { TxAbortError } from "@/server/orders/tx-abort-error";
 import { generateNextQueueNumber } from "./queue-number-service";
 import { getPrinterSettings } from "@/server/printing/settings-service";
 import { enqueuePaymentPrintJobs, dispatchPaymentPrintJobs } from "./cash-payment-print-helper";
+import { recordSyncInvoiceEvent } from "@/server/sync";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 import {
   MAX_CASH_AMOUNT,
@@ -148,6 +149,27 @@ export async function payOrderCash(params: CashPaymentParams): Promise<CashPayme
         status: "SUCCESS",
         createdAt: now,
       });
+
+      // 6b. Enqueue cloud sync invoice event in same tx
+      await recordSyncInvoiceEvent(
+        {
+          orderId: order.id,
+          orderCode: order.orderCode,
+          orderType: order.orderType,
+          status: "DA_THANH_TOAN",
+          totalAmount: order.totalAmount,
+          discountAmount: order.discountAmount,
+          finalAmount: order.finalAmount,
+          paymentMethod: "TIEN_MAT",
+          paidAt: now.toISOString(),
+          voidedAt: null,
+          voidReason: null,
+          queueNumber,
+          shiftId: shift.id,
+          version: nextVersion,
+        },
+        tx as any,
+      );
 
       // 7. Free table if dine-in
       if (order.tableId) {

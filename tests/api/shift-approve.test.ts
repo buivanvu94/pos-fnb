@@ -6,6 +6,7 @@ import { eq, desc } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { POST as approveShiftHandler } from "@/app/api/v1/shifts/approve/route";
 import { POST as createOrderHandler } from "@/app/api/v1/orders/route";
@@ -20,7 +21,7 @@ describe("Shift Approve API - POST /api/v1/shifts/approve (US-10, FR-09, BR-05, 
   let cashierToken: string;
   let managerUserId: number;
   let managerToken: string;
-  const managerPin = "8899";
+  const managerPin = generateSafeTestPin();
 
   let testAreaId: number;
   let testTableId: number;
@@ -116,6 +117,9 @@ describe("Shift Approve API - POST /api/v1/shifts/approve (US-10, FR-09, BR-05, 
   });
 
   afterAll(async () => {
+    if (db) {
+      await clearManagerPinHash(db, managerUserId);
+    }
     await pool.end();
   });
 

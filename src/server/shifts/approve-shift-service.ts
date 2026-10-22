@@ -6,6 +6,8 @@ import { getShiftFinancialReport } from "./shift-financial-report";
 import { countUnpaidTables } from "./shift-tables-check";
 import { formatErr04 } from "@/lib/error-catalog";
 import { enqueueOutboxItem, processOutbox } from "@/server/outbox";
+import { recordSyncShiftEvent } from "@/server/sync";
+import { logAudit } from "@/server/approvals/audit-log-service";
 import { dispatchPrintJob } from "@/server/printing/print-service";
 import { buildCloseShiftPayloads } from "./shift-close-payload-builder";
 import type { TokenPayload } from "@/server/auth/jwt";
@@ -151,25 +153,46 @@ export async function approveShift(params: ApproveShiftParams): Promise<ApproveS
 
     printJobIdToDispatch = job?.id;
 
-    await tx.insert(auditLogs).values({
-      userId: user.userId,
-      action: "CLOSE_SHIFT_APPROVE",
-      entityType: "SHIFT",
-      entityId: String(lockedShift.id),
-      reason: effectiveReason,
-      metadata: JSON.stringify({
-        event: "ca_lam_viec_da_dong",
-        maCa: lockedShift.shiftCode,
-        nhanVienId: lockedShift.cashierId,
-        doLechTien: difference,
-        thoiGianCa: shiftDurationSeconds,
-        approverId: approver.id,
-        approverName: approver.fullName || approver.username,
-      }),
-      ipAddress: clientIp,
-    });
+    await logAudit(
+      {
+        userId: user.userId,
+        action: "CLOSE_SHIFT_APPROVE",
+        entityType: "SHIFT",
+        entityId: lockedShift.id,
+        reason: effectiveReason,
+        metadata: {
+          event: "ca_lam_viec_da_dong",
+          maCa: lockedShift.shiftCode,
+          nhanVienId: lockedShift.cashierId,
+          doLechTien: difference,
+          thoiGianCa: shiftDurationSeconds,
+          approverId: approver.id,
+          approverName: approver.fullName || approver.username,
+        },
+        ipAddress: clientIp,
+      },
+      tx as any,
+    );
 
     await enqueueOutboxItem("TELEGRAM_SHIFT_CLOSE", telegramPayload, `telegram_shift_close_${lockedShift.id}`, tx);
+
+    await recordSyncShiftEvent(
+      {
+        shiftId: updated.id,
+        shiftCode: updated.shiftCode,
+        cashierId: updated.cashierId,
+        initialCash: updated.initialCash,
+        actualCash: updated.actualCash,
+        expectedCash: updated.expectedCash,
+        difference: updated.difference,
+        explanation: updated.explanation,
+        status: updated.status,
+        openedAt: updated.openedAt.toISOString(),
+        closedAt: updated.closedAt ? updated.closedAt.toISOString() : null,
+        approvedById: updated.approvedById,
+      },
+      tx as any,
+    );
 
     return { ok: true, status: 200, shift: updated };
   });
