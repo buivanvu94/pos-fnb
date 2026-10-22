@@ -55,11 +55,12 @@ export function CounterCart({
     {
       title: "Số lượng",
       key: "quantity",
-      width: 120,
+      width: 150,
       render: (_: any, record: OrderItemDetail) => (
         <Space size={4}>
           <Button
             size="small"
+            aria-label={`Giảm số lượng ${record.menuItemName}`}
             icon={<MinusOutlined />}
             disabled={loading}
             onClick={() => onQuantityChange(record, record.quantity - 1)}
@@ -69,6 +70,7 @@ export function CounterCart({
           </Text>
           <Button
             size="small"
+            aria-label={`Tăng số lượng ${record.menuItemName}`}
             icon={<PlusOutlined />}
             disabled={loading}
             onClick={() => onQuantityChange(record, record.quantity + 1)}
@@ -88,12 +90,13 @@ export function CounterCart({
     {
       title: "",
       key: "action",
-      width: 48,
+      width: 56,
       render: (_: any, record: OrderItemDetail) => (
         <Button
           type="text"
           danger
           size="small"
+          aria-label={`Xóa ${record.menuItemName} khỏi giỏ`}
           icon={<DeleteOutlined />}
           disabled={loading}
           onClick={() => onDeleteItem(record)}

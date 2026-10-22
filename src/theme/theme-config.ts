@@ -30,6 +30,7 @@ export const themeConfig: ThemeConfig = {
   components: {
     Button: {
       controlHeight: 44,
+      controlHeightSM: 44, // nút size="small" vẫn giữ vùng chạm tối thiểu 44px
       fontSize: 16,
       borderRadius: 8,
     },

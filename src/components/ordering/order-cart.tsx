@@ -86,11 +86,12 @@ export function OrderCart({
     {
       title: "SL",
       key: "quantity",
-      width: 105,
+      width: 150,
       render: (_: any, record: OrderItemDetail) => (
         <Space size={4}>
           <Button
             size="small"
+            aria-label={`Giảm số lượng ${record.menuItemName}`}
             icon={<MinusOutlined />}
             disabled={record.isPrintedKitchen || loading}
             onClick={() => onQuantityChange(record, record.quantity - 1)}
@@ -100,6 +101,7 @@ export function OrderCart({
           </Text>
           <Button
             size="small"
+            aria-label={`Tăng số lượng ${record.menuItemName}`}
             icon={<PlusOutlined />}
             disabled={record.isPrintedKitchen || loading}
             onClick={() => onQuantityChange(record, record.quantity + 1)}
@@ -121,7 +123,7 @@ export function OrderCart({
     {
       title: "",
       key: "action",
-      width: 45,
+      width: 56,
       render: (_: any, record: OrderItemDetail) =>
         record.isPrintedKitchen ? (
           <Tooltip title="Hủy món đã gửi bếp">
@@ -129,6 +131,7 @@ export function OrderCart({
               size="small"
               type="text"
               danger
+              aria-label={`Hủy món đã gửi bếp ${record.menuItemName}`}
               icon={<DeleteOutlined />}
               onClick={() => onCancelKitchenItem?.(record)}
             />
@@ -140,7 +143,13 @@ export function OrderCart({
             cancelText="Hủy"
             onConfirm={() => onDeleteItem(record)}
           >
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            <Button
+              size="small"
+              type="text"
+              danger
+              aria-label={`Xóa ${record.menuItemName} khỏi đơn`}
+              icon={<DeleteOutlined />}
+            />
           </Popconfirm>
         ),
     },

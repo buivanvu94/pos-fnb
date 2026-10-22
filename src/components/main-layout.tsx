@@ -8,6 +8,7 @@ import {
   ShoppingOutlined,
   BarChartOutlined,
   CoffeeOutlined,
+  ClockCircleOutlined,
   UserOutlined,
   LogoutOutlined,
   CheckCircleOutlined,
@@ -143,7 +144,7 @@ export function MainLayout({ children }: MainLayoutProps) {
       >
         <Space size="middle">
           <Text strong style={{ fontSize: 18, color: "#1677ff", cursor: "pointer" }} onClick={() => router.push("/tables")}>
-            ☕ POS F&B
+            <CoffeeOutlined /> POS F&B
           </Text>
           <Menu
             mode="horizontal"
@@ -155,7 +156,7 @@ export function MainLayout({ children }: MainLayoutProps) {
 
         <Space size="large">
           <Tag color="cyan" style={{ fontSize: 13, padding: "4px 8px" }}>
-            🕒 {currentTime}
+            <ClockCircleOutlined /> {currentTime}
           </Tag>
 
           {currentUser && (

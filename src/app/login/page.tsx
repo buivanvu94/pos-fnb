@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { Form, Input, Button, Card, Typography, Alert, Space, Tag } from "antd";
-import { UserOutlined, LockOutlined, LoginOutlined } from "@ant-design/icons";
+import { UserOutlined, LockOutlined, LoginOutlined, CoffeeOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 
 const { Title, Text } = Typography;
@@ -69,7 +69,7 @@ export default function LoginPage() {
       >
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <Title level={2} style={{ color: "#1677ff", marginBottom: 8 }}>
-            ☕ POS F&B
+            <CoffeeOutlined /> POS F&B
           </Title>
           <Text type="secondary" style={{ fontSize: 16 }}>
             Hệ thống quản lý bán hàng quán ăn, cafe
