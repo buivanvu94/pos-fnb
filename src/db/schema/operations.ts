@@ -26,7 +26,7 @@ export const printJobs = pgTable(
     index("print_jobs_order_id_idx").on(table.orderId),
     check(
       "print_jobs_job_type_check",
-      sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT', 'CASH_RECEIPT')`,
+      sql`${table.jobType} IN ('KOT_KITCHEN', 'KOT_BAR', 'RECEIPT_TEMP', 'RECEIPT_FINAL', 'Z_REPORT', 'CASH_RECEIPT', 'PICKUP_TICKET')`,
     ),
     check("print_jobs_status_check", sql`${table.status} IN ('PENDING', 'SENDING', 'SENT', 'FAILED')`),
   ],

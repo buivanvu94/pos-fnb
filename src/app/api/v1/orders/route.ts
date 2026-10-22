@@ -2,24 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOpenShift } from "@/server/shifts/require-open-shift";
 import { can } from "@/lib/permissions";
 import { createOrderSchema } from "@/server/orders/order-schema";
-import { createTableOrder } from "@/server/orders/order-service";
+import { createTableOrder, createTakeawayOrder } from "@/server/orders/order-service";
 
 /**
  * POST /api/v1/orders
- * Opens an active dine-in order (TAI_BAN) for an empty table (FR-01, FR-02, BR-02, AC-02-1).
- * Requires an open shift (ERR-01) and sets table status to DANG_DUNG.
+ * Opens an active dine-in order (TAI_BAN) or takeaway order (MANG_VE) (FR-01, FR-02, FR-05, BR-02, AC-02-1, AC-05-1).
+ * Requires an open shift (ERR-01).
  */
 export async function POST(req: NextRequest) {
   const shiftAuth = await requireOpenShift(req);
   if (!shiftAuth.authorized) {
     return shiftAuth.response;
-  }
-
-  if (!can(shiftAuth.user.role, "CREATE_ORDER_AT_TABLE")) {
-    return NextResponse.json(
-      { ok: false, error: "Quyền truy cập bị từ chối: Không có quyền tạo đơn tại bàn" },
-      { status: 403 },
-    );
   }
 
   const rawBody = await req.json().catch(() => null);
@@ -35,12 +28,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const isTakeaway = parsed.data.orderType === "MANG_VE";
+
+  if (isTakeaway) {
+    if (!can(shiftAuth.user.role, "CREATE_COUNTER_ORDER")) {
+      return NextResponse.json(
+        { ok: false, error: "Quyền truy cập bị từ chối: Không có quyền tạo đơn tại quầy" },
+        { status: 403 },
+      );
+    }
+  } else {
+    if (!can(shiftAuth.user.role, "CREATE_ORDER_AT_TABLE")) {
+      return NextResponse.json(
+        { ok: false, error: "Quyền truy cập bị từ chối: Không có quyền tạo đơn tại bàn" },
+        { status: 403 },
+      );
+    }
+  }
+
   try {
-    const result = await createTableOrder(
-      parsed.data.tableId,
-      shiftAuth.user,
-      shiftAuth.shift,
-    );
+    const result = isTakeaway
+      ? await createTakeawayOrder(shiftAuth.user, shiftAuth.shift)
+      : await createTableOrder(parsed.data.tableId!, shiftAuth.user, shiftAuth.shift);
 
     if (!result.ok) {
       return NextResponse.json(

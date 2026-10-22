@@ -196,3 +196,46 @@ Hệ thống cung cấp cơ chế phê duyệt bằng mã PIN Quản lý cho cá
 - Các hành động được kiểm toán tự động: `CANCEL_KITCHEN_ITEM`, `DISCOUNT_ORDER`, `CANCEL_ORDER`, `DELETE_EMPTY_ORDER`, `REMOVE_UNSENT_ITEM`, `SETTINGS_CHANGED`, `PIN_CHANGED`, `LOGIN_FAILED`, `LOGIN_LOCKED`.
 - **Ghi chú rủi ro đã chấp nhận (Accepted Risk)**:
   Cơ chế khóa đăng nhập dựa theo `username` có thể bị kẻ xấu lợi dụng để tạm thời khóa tài khoản của người khác bằng cách cố ý gửi liên tiếp 5 lần mật khẩu sai. Rủi ro này được chấp nhận trong môi trường F&B nội bộ quán vì: (1) Các phiên làm việc đã đăng nhập trước đó vẫn hoạt động bình thường mà không bị ngắt quãng; (2) Tài khoản tự động mở khóa sau 5 phút; (3) Chưa áp dụng khóa theo địa chỉ IP do cờ `TRUST_PROXY` mặc định tắt (`false`) để tránh rủi ro giả mạo IP client trên mạng LAN.
+
+
+## 7. Thanh toán tiền mặt, Bán tại quầy/mang về & Hủy hóa đơn (Phase 07)
+
+Hệ thống cung cấp quy trình thanh toán tiền mặt tại quầy & tại bàn, in phiếu tạm tính, in lại hóa đơn, và hủy hóa đơn sau thanh toán có duyệt mã PIN Quản lý (US-05, US-07, FR-05, FR-11, FR-13, BR-08, BR-10, BR-12, ERR-08, ERR-10, DEC-11, DEC-12).
+
+### 7.1 Thanh toán tiền mặt & Kích mở két tiền (SCR-06, DEC-11)
+- **Phương thức thanh toán**: Tiền mặt (`TIEN_MAT`), chuẩn bị sẵn sàng mở rộng VietQR tĩnh và động ở Phase 08.
+- **Hộp gợi ý tiền khách đưa nhanh**: Cung cấp các nút mệnh giá phổ biến VNĐ (500.000đ, 200.000đ, 100.000đ, 50.000đ, 20.000đ, 10.000đ, và "Đủ tiền"), tự động tính tiền thừa trả khách (`tienThua = tienKhachDua - finalAmount`). Chặn thanh toán nếu tiền khách đưa nhỏ hơn tổng tiền phải trả (ERR-08).
+- **Giao dịch thanh toán nguyên tử (Atomic Payment Transaction)**:
+  - Cập nhật đơn hàng: `status = 'DA_THANH_TOAN'`, `paymentStatus = 'PAID'`, `completedAt = now()`.
+  - Khóa bàn: Đối với đơn tại bàn (`orderType = 'DINE_IN'`), tự động chuyển bàn về `BAN_TRONG` (trừ khi bàn có đơn ghép khác chưa thanh toán).
+  - Bản ghi thanh toán: Tạo bản ghi trong bảng `payments` với trạng thái `COMPLETED`.
+  - Sinh số thứ tự lấy đồ (`queue_number`): Áp dụng khóa `pg_advisory_xact_lock(hashtext('queue_number_YYYY-MM-DD'))` để cấp số thứ tự 1..N duy nhất và không ngắt quãng trong ngày cho cả đơn tại quầy và mang về.
+  - Hàng đợi in: Tạo phiếu in hóa đơn thanh toán `RECEIPT_FINAL` (có cờ `kickDrawer: true` để kích xung mở két tiền) và phiếu lấy đồ `PICKUP_TICKET` cho khách mang về.
+  - Ngăn chặn thanh toán kép đồng thời (Double Payment Protection): Sử dụng `expectedVersion` và khóa `FOR UPDATE` tuần tự hóa các yêu cầu thanh toán trùng lặp.
+
+### 7.2 In phiếu tạm tính (Provisional Bill - FR-11)
+- Cho phép in phiếu tạm tính (`RECEIPT_TEMP`) để khách hàng kiểm tra chi tiết các món trước khi thanh toán.
+- Đổi trạng thái bàn thành `CHO_THANH_TOAN` (màu cam trên sơ đồ bàn).
+- Lệnh in phiếu tạm tính không mở két tiền (`kickDrawer: false`).
+- Xử lý cảnh báo lỗi máy in (`ERR-10`): Nếu máy in hóa đơn mất kết nối, hệ thống vẫn lưu trạng thái bàn `CHO_THANH_TOAN` và trả về cảnh báo để thu ngân biết mà không làm gián đoạn nghiệp vụ phục vụ.
+
+### 7.3 Tính bất biến của hóa đơn sau thanh toán (BR-08) & In lại hóa đơn (FR-13)
+- **Tính bất biến (Immutability)**: Ngay khi đơn hàng chuyển sang `DA_THANH_TOAN`, hệ thống đóng băng toàn bộ đơn hàng. Mọi hành vi sửa món, thêm món, giảm giá, hoặc hủy món đều bị chặn tuyệt đối (HTTP 409 Conflict).
+- **In lại hóa đơn (`POST /api/v1/orders/:id/reprint`)**:
+  - Hỗ trợ in lại hóa đơn đã thanh toán khi khách yêu cầu thêm liên hóa đơn hoặc máy in trước đó bị hết giấy.
+  - Bản in lại được đóng dấu "BẢN IN LẠI / REPRINT" rõ ràng để chống gian lận.
+  - Lệnh in lại KHÔNG kích mở két tiền (`kickDrawer: false`).
+
+### 7.4 Hủy hóa đơn sau thanh toán (Void Bill - US-07, BR-10, DEC-12)
+- Hỗ trợ xử lý trường hợp thu ngân bấm nhầm đơn hoặc khách đổi ý hoàn trả sau khi đã hoàn tất thanh toán.
+- **Ràng buộc ca làm việc (BR-10)**: Chỉ được phép hủy hóa đơn trong ca làm việc đang mở (`DANG_MO`). Nếu ca đã chốt (Z-Report), hệ thống từ chối hủy (HTTP 409).
+- **Phê duyệt Quản lý bắt buộc**: Yêu cầu xác thực mã PIN Quản lý (`withManagerApproval`) và lý do hủy tối thiểu 5 ký tự.
+- **Giao dịch nguyên tử**:
+  - Cập nhật trạng thái đơn hàng thành `DA_HUY`.
+  - Cập nhật trạng thái thanh toán thành `VOIDED`.
+  - Ghi nhận nhật ký kiểm toán `audit_logs` với hành động `VOID_BILL`, lưu vết người duyệt, mã PIN, lý do và metadata tài chính đối soát doanh thu ca.
+
+### 7.5 Quầy bán mang về (Takeaway Counter - SCR-04, US-05)
+- Màn hình bán hàng nhanh tại quầy (`/counter`), phục vụ khách mua mang về không gắn bàn (`orderType: 'TAKEAWAY'`).
+- Tích hợp giỏ hàng chạm cảm ứng, phím tăng/giảm số lượng nhanh, chọn món ăn kèm, ghi chú món ăn.
+- Tích hợp ngăn kéo xem danh sách "Hóa đơn trong ca" (`ShiftInvoicesDrawer`) giúp thu ngân tra cứu nhanh doanh thu ca, thực hiện in lại hóa đơn hoặc hủy hóa đơn nhanh chóng ngay tại quầy.

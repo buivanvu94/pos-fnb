@@ -1,6 +1,15 @@
 import React from "react";
 import { Card, Table, Button, Space, Typography, Statistic, Tooltip, Tag, Popconfirm } from "antd";
-import { PlusOutlined, MinusOutlined, DeleteOutlined, SendOutlined, SwapOutlined, PrinterOutlined, PercentageOutlined } from "@ant-design/icons";
+import {
+  PlusOutlined,
+  MinusOutlined,
+  DeleteOutlined,
+  SendOutlined,
+  SwapOutlined,
+  PrinterOutlined,
+  PercentageOutlined,
+  CreditCardOutlined,
+} from "@ant-design/icons";
 import { formatVnd } from "@/lib/money";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 
@@ -11,6 +20,7 @@ interface OrderCartProps {
   tableName?: string;
   loading?: boolean;
   sendingKitchen?: boolean;
+  provisionalLoading?: boolean;
   userRole?: string;
   onQuantityChange: (item: OrderItemDetail, newQty: number) => void;
   onDeleteItem: (item: OrderItemDetail) => void;
@@ -20,6 +30,8 @@ interface OrderCartProps {
   onOpenTransferModal: () => void;
   onCancelOrder?: () => void;
   onCancelOrderWithItems?: () => void;
+  onPrintProvisional?: () => void;
+  onNavigatePayment?: () => void;
 }
 
 export function OrderCart({
@@ -27,6 +39,7 @@ export function OrderCart({
   tableName,
   loading = false,
   sendingKitchen = false,
+  provisionalLoading = false,
   userRole,
   onQuantityChange,
   onDeleteItem,
@@ -36,6 +49,8 @@ export function OrderCart({
   onOpenTransferModal,
   onCancelOrder,
   onCancelOrderWithItems,
+  onPrintProvisional,
+  onNavigatePayment,
 }: OrderCartProps) {
   const items = order?.items ?? [];
   const hasUnprintedItems = items.some((i) => !i.isPrintedKitchen);
@@ -221,9 +236,30 @@ export function OrderCart({
             </Button>
           )}
 
-          <Tooltip title="Chức năng thanh toán và in tạm tính sẽ mở ở Phase 07">
-            <Button size="large" block disabled icon={<PrinterOutlined />}>In tạm tính</Button>
-          </Tooltip>
+          <Button
+            size="large"
+            block
+            icon={<PrinterOutlined />}
+            loading={provisionalLoading}
+            disabled={!order || items.length === 0 || loading}
+            onClick={onPrintProvisional}
+          >
+            In tạm tính
+          </Button>
+
+          {canDiscountOrCancel && (
+            <Button
+              type="primary"
+              size="large"
+              block
+              style={{ backgroundColor: "#52c41a", borderColor: "#52c41a" }}
+              icon={<CreditCardOutlined />}
+              disabled={!order || items.length === 0 || order.finalAmount <= 0 || loading}
+              onClick={onNavigatePayment}
+            >
+              Thanh toán
+            </Button>
+          )}
         </Space>
       </div>
     </Card>

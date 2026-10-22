@@ -97,6 +97,56 @@ export async function createTableOrder(
 }
 
 /**
+ * Creates a new active takeaway order (MANG_VE) without a table (FR-05, UC-04).
+ */
+export async function createTakeawayOrder(
+  user: TokenPayload,
+  shift: Shift,
+): Promise<{ ok: true; order: OrderDetail } | { ok: false; error: string; status: number }> {
+  return await db.transaction(async (tx) => {
+    const orderCode = await generateOrderCode(tx as any);
+
+    const [newOrder] = await tx
+      .insert(orders)
+      .values({
+        orderCode,
+        orderType: "MANG_VE",
+        tableId: null,
+        shiftId: shift.id,
+        totalAmount: 0,
+        discountAmount: 0,
+        finalAmount: 0,
+        status: "DANG_PHUC_VU",
+        version: 1,
+        createdById: user.userId,
+      })
+      .returning();
+
+    return {
+      ok: true,
+      order: {
+        id: newOrder.id,
+        orderCode: newOrder.orderCode,
+        orderType: newOrder.orderType,
+        tableId: null,
+        tableName: null,
+        areaId: null,
+        areaName: null,
+        shiftId: newOrder.shiftId,
+        totalAmount: 0,
+        discountAmount: 0,
+        finalAmount: 0,
+        paymentMethod: null,
+        status: newOrder.status,
+        version: newOrder.version,
+        createdAt: newOrder.createdAt,
+        items: [],
+      },
+    };
+  });
+}
+
+/**
  * Retrieves full order details with all items, toppings, and pricing.
  */
 export async function getOrderDetails(orderId: number, tx: DbOrTx = db): Promise<OrderDetail | null> {

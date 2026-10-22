@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Row, Col, Typography, Space, App, Spin } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { MenuGrid, MenuItemData, CategoryData } from "./menu-grid";
@@ -30,10 +31,12 @@ export function OrderingView({
   onBackToTables,
   onTableStatusChanged,
 }: OrderingViewProps) {
+  const router = useRouter();
   const { message } = App.useApp();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(true);
   const [transferLoading, setTransferLoading] = useState(false);
+  const [provisionalLoading, setProvisionalLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>("PHUC_VU");
 
   // Menu data
@@ -146,6 +149,38 @@ export function OrderingView({
     return <div style={{ textAlign: "center", padding: 80 }}><Spin size="large" /></div>;
   }
 
+  const handlePrintProvisional = async () => {
+    if (!order) return;
+    setProvisionalLoading(true);
+    try {
+      const res = await fetch(`/api/v1/orders/${order.id}/provisional-print`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: order.version }),
+      });
+      const d = await res.json();
+      if (d.ok) {
+        message.success("Đã in phiếu tạm tính cho khách");
+        if (d.printWarning) {
+          message.warning(d.printWarning.message);
+        }
+        fetchOrder();
+        onTableStatusChanged();
+      } else {
+        message.error(d.error || "Lỗi khi in tạm tính");
+      }
+    } catch {
+      message.error("Lỗi kết nối khi gửi lệnh in tạm tính");
+    } finally {
+      setProvisionalLoading(false);
+    }
+  };
+
+  const handleNavigatePayment = () => {
+    if (!order) return;
+    router.push(`/payment/${order.id}`);
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -173,6 +208,7 @@ export function OrderingView({
             tableName={table.name}
             loading={actionLoading || approvalLoading}
             sendingKitchen={sendingKitchen}
+            provisionalLoading={provisionalLoading}
             userRole={userRole}
             onQuantityChange={changeQuantity}
             onDeleteItem={deleteItem}
@@ -185,6 +221,8 @@ export function OrderingView({
               if (ok) onBackToTables();
             }}
             onCancelOrderWithItems={handleCancelOrderWithItemsClick}
+            onPrintProvisional={handlePrintProvisional}
+            onNavigatePayment={handleNavigatePayment}
           />
         </Col>
       </Row>

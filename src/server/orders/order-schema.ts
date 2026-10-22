@@ -2,9 +2,18 @@ import { z } from "zod";
 
 export const MAX_ORDER_AMOUNT = 2_000_000_000; // 2 tỷ VNĐ
 
-export const createOrderSchema = z.object({
-  tableId: z.coerce.number().int().positive({ message: "Mã bàn không hợp lệ" }),
-});
+export const createOrderSchema = z
+  .object({
+    tableId: z.coerce.number().int().positive({ message: "Mã bàn không hợp lệ" }).optional(),
+    orderType: z.enum(["TAI_BAN", "MANG_VE"]).optional().default("TAI_BAN"),
+  })
+  .refine(
+    (data) => {
+      if (data.orderType === "TAI_BAN" && !data.tableId) return false;
+      return true;
+    },
+    { message: "Đơn tại bàn yêu cầu chọn mã bàn hợp lệ", path: ["tableId"] },
+  );
 
 export const orderItemInputSchema = z
   .object({

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { NextRequest } from "next/server";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { sql } from "drizzle-orm";
+import { sql, asc } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
@@ -289,7 +289,7 @@ describe("Cash Transaction API - POST /api/v1/shifts/cash-transaction (US-09, FR
   });
 
   it("records cash out (CHI) 50,000, updates theoretical cash and queues CASH_RECEIPT print job (AC-09-1)", async () => {
-    const printJobsBefore = await db.select().from(schema.printJobs);
+    const printJobsBefore = await db.select().from(schema.printJobs).orderBy(asc(schema.printJobs.id));
     const countBefore = printJobsBefore.length;
 
     const req = new NextRequest("http://localhost:3000/api/v1/shifts/cash-transaction", {
@@ -318,7 +318,7 @@ describe("Cash Transaction API - POST /api/v1/shifts/cash-transaction (US-09, FR
     expect(body.data.expectedCash).toBe(960_000);
 
     // Verify exactly ONE print_job was created with CASH_RECEIPT
-    const printJobsAfter = await db.select().from(schema.printJobs);
+    const printJobsAfter = await db.select().from(schema.printJobs).orderBy(asc(schema.printJobs.id));
     expect(printJobsAfter.length).toBe(countBefore + 1);
     const latestJob = printJobsAfter[printJobsAfter.length - 1];
     expect(latestJob.jobType).toBe("CASH_RECEIPT");
@@ -332,7 +332,7 @@ describe("Cash Transaction API - POST /api/v1/shifts/cash-transaction (US-09, FR
   });
 
   it("records cash in (THU) 200,000, updates theoretical cash and queues CASH_RECEIPT print job (AC-09-2)", async () => {
-    const printJobsBefore = await db.select().from(schema.printJobs);
+    const printJobsBefore = await db.select().from(schema.printJobs).orderBy(asc(schema.printJobs.id));
     const countBefore = printJobsBefore.length;
 
     const req = new NextRequest("http://localhost:3000/api/v1/shifts/cash-transaction", {
@@ -360,7 +360,7 @@ describe("Cash Transaction API - POST /api/v1/shifts/cash-transaction (US-09, FR
     expect(body.data.expectedCash).toBe(1_160_000);
 
     // Verify exactly ONE print_job was created
-    const printJobsAfter = await db.select().from(schema.printJobs);
+    const printJobsAfter = await db.select().from(schema.printJobs).orderBy(asc(schema.printJobs.id));
     expect(printJobsAfter.length).toBe(countBefore + 1);
     const latestJob = printJobsAfter[printJobsAfter.length - 1];
     expect(latestJob.jobType).toBe("CASH_RECEIPT");

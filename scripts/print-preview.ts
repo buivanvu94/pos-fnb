@@ -8,6 +8,7 @@ import type {
   FinalReceiptPayload,
   CashReceiptPayload,
   ZReportPayload,
+  PickupTicketPayload,
 } from "../src/server/printing/print-payload-types";
 
 async function main() {
@@ -233,6 +234,36 @@ async function main() {
     { name: "final-receipt", payload: sampleFinalReceipt },
     { name: "cash-receipt", payload: sampleCashReceipt },
     { name: "z-report", payload: sampleZReport },
+    {
+      name: "pickup-ticket",
+      payload: {
+        kind: "PICKUP_TICKET",
+        orderId: 105,
+        orderCode: "HD-20261022-0088",
+        queueNumber: 12,
+        queueDate: "2026-10-22",
+        cashierName: "Nguyễn Thu Ngân",
+        printedAt: "2026-10-22T09:15:00.000Z",
+        storeName: "PHỞ & CÀ PHÊ SÀI GÒN",
+        items: [
+          {
+            name: "Trà sữa trân châu hoàng gia",
+            quantity: 2,
+            unitPrice: 35000,
+            totalPrice: 70000,
+            toppings: ["Trân châu đen", "Pudding trứng"],
+            notes: "70% đường, 50% đá",
+          },
+          {
+            name: "Cà phê sữa đá Sài Gòn",
+            quantity: 1,
+            unitPrice: 28000,
+            totalPrice: 28000,
+          },
+        ],
+        total: 98000,
+      } as PickupTicketPayload,
+    },
     // Edge cases for coordinator visual review
     { name: "edge-case-receipt", payload: sampleEdgeCaseReceipt },
     { name: "edge-case-kot", payload: sampleEdgeCaseKot },

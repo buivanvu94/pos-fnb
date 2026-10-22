@@ -126,11 +126,25 @@ export interface ZReportPayload {
   storeName?: string;
 }
 
+export interface PickupTicketPayload {
+  kind: "PICKUP_TICKET";
+  orderId: number;
+  orderCode: string;
+  queueNumber: number;
+  queueDate: string;
+  cashierName: string;
+  printedAt: string;
+  storeName?: string;
+  items: ReceiptItemPayload[];
+  total: number;
+}
+
 export type PrintPayload =
   | KotPayload
   | KotCancelPayload
   | ProvisionalPayload
   | FinalReceiptPayload
   | CashReceiptPayload
-  | ZReportPayload;
+  | ZReportPayload
+  | PickupTicketPayload;
 
