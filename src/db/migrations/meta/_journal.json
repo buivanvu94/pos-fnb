@@ -54,8 +54,15 @@
     {
       "idx": 7,
       "version": "7",
-      "when": 1792635078836,
-      "tag": "0007_wealthy_miek",
+      "when": 1792650000000,
+      "tag": "0007_phase10_revenue_report_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792660000000,
+      "tag": "0008_vietqr_sepay_payments",
       "breakpoints": true
     }
   ]

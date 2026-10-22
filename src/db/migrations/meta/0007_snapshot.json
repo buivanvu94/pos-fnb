@@ -1,5 +1,5 @@
 {
-  "id": "7a16073d-fdce-4ac8-bed1-f5db90b4bde8",
+  "id": "4a1a6dd7-dfbb-4510-a53b-8562e9522c06",
   "prevId": "2de3b06e-e024-4d12-afc1-8540cbc23885",
   "version": "7",
   "dialect": "postgresql",
@@ -1285,6 +1285,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "orders_paid_at_idx": {
+          "name": "orders_paid_at_idx",
+          "columns": [
+            {
+              "expression": "paid_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1432,24 +1447,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "qr_content": {
-          "name": "qr_content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sepay_transaction_id": {
-          "name": "sepay_transaction_id",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "status": {
           "name": "status",
           "type": "varchar(20)",
@@ -1492,22 +1489,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "payments_sepay_tx_unique": {
-          "name": "payments_sepay_tx_unique",
-          "columns": [
-            {
-              "expression": "sepay_transaction_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "sepay_transaction_id IS NOT NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -1555,189 +1536,9 @@
         },
         "payments_status_check": {
           "name": "payments_status_check",
-          "value": "\"payments\".\"status\" IN ('PENDING', 'SUCCESS', 'FAILED', 'VOIDED', 'EXPIRED')"
+          "value": "\"payments\".\"status\" IN ('PENDING', 'SUCCESS', 'FAILED', 'VOIDED')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.unmatched_transactions": {
-      "name": "unmatched_transactions",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "gateway": {
-          "name": "gateway",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'SEPAY'"
-        },
-        "gateway_transaction_id": {
-          "name": "gateway_transaction_id",
-          "type": "varchar(100)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "amount": {
-          "name": "amount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content": {
-          "name": "content",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transfer_type": {
-          "name": "transfer_type",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": false,
-          "default": "'IN'"
-        },
-        "order_code": {
-          "name": "order_code",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "order_id": {
-          "name": "order_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "raw_payload": {
-          "name": "raw_payload",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'UNRESOLVED'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolved_by_id": {
-          "name": "resolved_by_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "resolution_notes": {
-          "name": "resolution_notes",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "unmatched_tx_gateway_id_idx": {
-          "name": "unmatched_tx_gateway_id_idx",
-          "columns": [
-            {
-              "expression": "gateway_transaction_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "unmatched_tx_order_code_idx": {
-          "name": "unmatched_tx_order_code_idx",
-          "columns": [
-            {
-              "expression": "order_code",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "unmatched_tx_order_id_idx": {
-          "name": "unmatched_tx_order_id_idx",
-          "columns": [
-            {
-              "expression": "order_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "unmatched_transactions_order_id_orders_id_fk": {
-          "name": "unmatched_transactions_order_id_orders_id_fk",
-          "tableFrom": "unmatched_transactions",
-          "tableTo": "orders",
-          "columnsFrom": [
-            "order_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "unmatched_transactions_resolved_by_id_users_id_fk": {
-          "name": "unmatched_transactions_resolved_by_id_users_id_fk",
-          "tableFrom": "unmatched_transactions",
-          "tableTo": "users",
-          "columnsFrom": [
-            "resolved_by_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.audit_logs": {
