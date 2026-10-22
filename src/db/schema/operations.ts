@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, text, timestamp, index, check } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, integer, text, timestamp, index, check, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { users } from "./users";
 import { orders } from "./orders-payments";
@@ -54,22 +54,27 @@ export const auditLogs = pgTable(
 );
 
 /**
- * Outbox queue for offline-first LAN store synchronization to cloud (NFR-04, DEC-10).
+ * Outbox queue for offline-first LAN store synchronization to cloud (NFR-04, DEC-10)
+ * and external event dispatching (Telegram, cloud sync).
  */
 export const outbox = pgTable(
   "outbox",
   {
     id: serial("id").primaryKey(),
-    eventType: varchar("event_type", { length: 50 }).notNull(),
-    aggregateId: varchar("aggregate_id", { length: 50 }).notNull(),
-    payload: text("payload").notNull(),
-    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENDING | SENT | FAILED
-    retryCount: integer("retry_count").notNull().default(0),
+    type: varchar("type", { length: 50 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 128 }).unique(),
+    payload: jsonb("payload").notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("PENDING"), // PENDING | SENT | FAILED
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastError: text("last_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    processedAt: timestamp("processed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
   },
   (table) => [
     index("outbox_status_idx").on(table.status),
+    index("outbox_type_idx").on(table.type),
+    index("outbox_next_attempt_at_idx").on(table.nextAttemptAt),
     check("outbox_status_check", sql`${table.status} IN ('PENDING', 'SENT', 'FAILED')`),
   ],
 );

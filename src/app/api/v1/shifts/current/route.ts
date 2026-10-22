@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray, desc } from "drizzle-orm";
 import { db } from "@/db";
 import { shifts } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
-import { getShiftCashBalance } from "@/server/shifts/cash-balance";
+import { getShiftFinancialReport } from "@/server/shifts/shift-financial-report";
 
 /**
  * GET /api/v1/shifts/current
- * Returns the currently active shift ('DANG_MO') for the logged in user,
- * enriched with theoretical cash balance calculated dynamically per BR-05.
- * Returns null if no active shift is currently open.
+ * Returns the currently active shift ('DANG_MO' or 'CHO_DUYET') for the logged in user,
+ * enriched with theoretical cash balance and financial statistics calculated dynamically per BR-05.
+ * Returns null if no active or pending shift is found.
  */
 export async function GET(req: NextRequest) {
   const auth = await requireRole(req);
@@ -23,7 +23,13 @@ export async function GET(req: NextRequest) {
     const [currentShift] = await db
       .select()
       .from(shifts)
-      .where(and(eq(shifts.cashierId, user.userId), eq(shifts.status, "DANG_MO")))
+      .where(
+        and(
+          eq(shifts.cashierId, user.userId),
+          inArray(shifts.status, ["DANG_MO", "CHO_DUYET"]),
+        ),
+      )
+      .orderBy(desc(shifts.id))
       .limit(1);
 
     if (!currentShift) {
@@ -33,7 +39,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const balance = await getShiftCashBalance(
+    const report = await getShiftFinancialReport(
       currentShift.id,
       currentShift.initialCash,
       db,
@@ -43,10 +49,16 @@ export async function GET(req: NextRequest) {
       ok: true,
       data: {
         ...currentShift,
-        expectedCash: balance.expectedCash,
-        cashSales: balance.cashSales,
-        cashIn: balance.cashIn,
-        cashOut: balance.cashOut,
+        expectedCash: report.expectedCash,
+        cashSales: report.cashSales,
+        vietqrSales: report.vietqrSales,
+        totalSales: report.totalSales,
+        cashIn: report.cashIn,
+        cashOut: report.cashOut,
+        invoiceCount: report.invoiceCount,
+        cancelledCount: report.cancelledCount,
+        cancelledAmount: report.cancelledAmount,
+        discountAmount: report.discountAmount,
       },
     });
   } catch (error) {

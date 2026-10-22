@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { shifts, Shift } from "@/db/schema";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
@@ -135,14 +135,34 @@ export async function requireOpenShiftPage(): Promise<{ user: TokenPayload; shif
     redirect("/login");
   }
 
-  const shift =
-    user.role === "PHUC_VU"
-      ? await shiftLookup.getAnyActiveShift()
-      : await shiftLookup.getActiveShift(user.userId);
+  if (user.role === "PHUC_VU") {
+    const shift = await shiftLookup.getAnyActiveShift();
+    if (!shift) {
+      redirect("/open-shift");
+    }
+    return { user, shift };
+  }
 
-  if (!shift) {
+  // For QUAN_LY and THU_NGAN: check shift status
+  const [userShift] = await db
+    .select()
+    .from(shifts)
+    .where(
+      and(
+        eq(shifts.cashierId, user.userId),
+        inArray(shifts.status, ["DANG_MO", "CHO_DUYET"]),
+      ),
+    )
+    .limit(1);
+
+  if (!userShift) {
     redirect("/open-shift");
   }
 
-  return { user, shift };
+  // Prevent redirect loop: if shift is pending manager approval, direct to close-shift
+  if (userShift.status === "CHO_DUYET") {
+    redirect("/close-shift");
+  }
+
+  return { user, shift: userShift };
 }

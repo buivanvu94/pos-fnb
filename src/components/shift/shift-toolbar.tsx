@@ -94,17 +94,17 @@ export function ShiftToolbar() {
           Thu / Chi
         </Button>
 
-        <Tooltip title="Chức năng kết ca và duyệt Z-Report sẽ được kích hoạt tại Phase 09">
-          <Button
-            type="primary"
-            danger
-            disabled
-            icon={<CheckCircleOutlined />}
-            style={{ height: 40, fontWeight: 600 }}
-          >
-            Kết ca
-          </Button>
-        </Tooltip>
+        <Button
+          type="primary"
+          danger
+          icon={<CheckCircleOutlined />}
+          style={{ height: 40, fontWeight: 600 }}
+          onClick={() => {
+            window.location.href = "/close-shift";
+          }}
+        >
+          {shift.status === "CHO_DUYET" ? "Chờ duyệt ca" : "Kết ca"}
+        </Button>
       </Space>
 
       <CashTransactionModal

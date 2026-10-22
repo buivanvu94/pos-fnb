@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { shifts } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
@@ -60,18 +60,19 @@ export async function POST(req: NextRequest) {
   const initialCash = tienDauCa;
 
   try {
-    // Check if cashier already has an active shift before starting transaction
+    // Check if cashier already has an active or pending approval shift before starting transaction
     const [existingShift] = await db
-      .select({ id: shifts.id, shiftCode: shifts.shiftCode })
+      .select({ id: shifts.id, shiftCode: shifts.shiftCode, status: shifts.status })
       .from(shifts)
-      .where(and(eq(shifts.cashierId, user.userId), eq(shifts.status, "DANG_MO")))
+      .where(and(eq(shifts.cashierId, user.userId), inArray(shifts.status, ["DANG_MO", "CHO_DUYET"])))
       .limit(1);
 
     if (existingShift) {
+      const statusText = existingShift.status === "DANG_MO" ? "đang mở" : "chờ Quản lý duyệt";
       return NextResponse.json(
         {
           ok: false,
-          error: `Nhân viên đang có ca làm việc đang mở (${existingShift.shiftCode}). Không thể mở thêm ca mới.`,
+          error: `Nhân viên đang có ca làm việc ${statusText} (${existingShift.shiftCode}). Không thể mở thêm ca mới.`,
         },
         { status: 409 },
       );

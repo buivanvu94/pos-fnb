@@ -64,6 +64,13 @@
       "when": 1792660000000,
       "tag": "0008_vietqr_sepay_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792670000000,
+      "tag": "0009_shift_close_outbox",
+      "breakpoints": true
     }
   ]
 }

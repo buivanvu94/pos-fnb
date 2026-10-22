@@ -23,8 +23,8 @@ export async function middleware(req: NextRequest) {
     pathname === "/api/v1/auth/login" ||
     pathname === "/api/v1/auth/logout";
 
-  // 1. Skip static assets and Next.js internal files (NEVER bypass /api/* or /admin/*)
-  const isProtectedPrefix = isApi || pathname.startsWith("/admin");
+  // 1. Skip static assets and Next.js internal files (NEVER bypass /api/*, /admin/*, or /close-shift)
+  const isProtectedPrefix = isApi || pathname.startsWith("/admin") || pathname.startsWith("/close-shift");
   if (!isProtectedPrefix) {
     if (
       pathname.startsWith("/_next") ||

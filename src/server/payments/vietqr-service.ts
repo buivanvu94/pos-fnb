@@ -1,6 +1,6 @@
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, payments } from "@/db/schema";
+import { orders, payments, shifts } from "@/db/schema";
 import { generateVietQrString, formatVietqrTransferContent } from "./vietqr-generator";
 import type {
   CreateVietQrPaymentParams,
@@ -16,7 +16,31 @@ export async function createOrRefreshVietQrPayment(
   const { orderId, expectedVersion, shiftId } = params;
 
   return await db.transaction(async (tx) => {
-    // 1. Fetch and lock order for update (prevents race condition)
+    // 0. Resolve target shift and acquire FOR SHARE first to enforce global lock order (shifts -> orders)
+    let targetShiftId = shiftId;
+    if (!targetShiftId) {
+      const [orderMeta] = await tx
+        .select({ shiftId: orders.shiftId })
+        .from(orders)
+        .where(eq(orders.id, orderId))
+        .limit(1);
+      targetShiftId = orderMeta?.shiftId;
+    }
+
+    if (targetShiftId) {
+      const [currentShift] = await tx
+        .select({ id: shifts.id, status: shifts.status })
+        .from(shifts)
+        .where(eq(shifts.id, targetShiftId))
+        .limit(1)
+        .for("share");
+
+      if (!currentShift || currentShift.status !== "DANG_MO") {
+        return { ok: false, status: 409, error: "Ca làm việc đã kết thúc hoặc không ở trạng thái Đang mở" };
+      }
+    }
+
+    // 1. Lock order for update
     const [order] = await tx
       .select()
       .from(orders)
@@ -29,10 +53,10 @@ export async function createOrRefreshVietQrPayment(
     }
 
     if (order.status !== "DANG_PHUC_VU") {
-      if (order.status === "DA_THANH_TOAN") {
-        return { ok: false, status: 409, error: "Hóa đơn này đã được thanh toán trước đó" };
-      }
-      return { ok: false, status: 409, error: "Trạng thái đơn hàng không hợp lệ để tạo mã VietQR" };
+      const error = order.status === "DA_THANH_TOAN"
+        ? "Hóa đơn này đã được thanh toán trước đó"
+        : "Trạng thái đơn hàng không hợp lệ để tạo mã VietQR";
+      return { ok: false, status: 409, error };
     }
 
     if (expectedVersion !== undefined && order.version !== expectedVersion) {
@@ -59,7 +83,6 @@ export async function createOrRefreshVietQrPayment(
     const bankBin = process.env.VIETQR_BANK_BIN || "970422";
     const accountNo = process.env.VIETQR_ACCOUNT_NO || "0123456789";
     const transferContent = formatVietqrTransferContent(order.orderCode);
-
     const qrContent = generateVietQrString({
       bankBin,
       accountNo,
@@ -67,7 +90,6 @@ export async function createOrRefreshVietQrPayment(
       transferContent,
       isDynamic: true,
     });
-
     const now = new Date();
     const expiresAt = new Date(now.getTime() + VIETQR_EXPIRY_SECONDS * 1000);
 
@@ -75,14 +97,7 @@ export async function createOrRefreshVietQrPayment(
     if (existingPayment) {
       await tx
         .update(payments)
-        .set({
-          amount: order.finalAmount,
-          qrContent,
-          vietqrRef: transferContent,
-          status: "PENDING",
-          expiresAt,
-          shiftId,
-        })
+        .set({ amount: order.finalAmount, qrContent, vietqrRef: transferContent, status: "PENDING", expiresAt, shiftId })
         .where(and(eq(payments.id, existingPayment.id), ne(payments.status, "SUCCESS")));
       paymentId = existingPayment.id;
     } else {

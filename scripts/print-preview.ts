@@ -136,6 +136,10 @@ async function main() {
     expectedCash: 7700000,
     actualCash: 7700000,
     discrepancy: 0,
+    invoiceCount: 42,
+    cancelledCount: 1,
+    cancelledAmount: 85000,
+    discountAmount: 150000,
     storeName: "POS Cafe & Restaurant",
   };
 

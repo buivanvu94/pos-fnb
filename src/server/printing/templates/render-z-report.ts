@@ -108,6 +108,37 @@ export function renderZReportCanvas(payload: ZReportPayload, width: number): Can
     y += 10;
   }
 
+  drawDashedLine(ctx, y, width);
+  y += 14;
+
+  const invoiceNum = payload.invoiceCount ?? payload.orderCount ?? 0;
+  drawTwoColumn(ctx, "Số hóa đơn trong ca:", String(invoiceNum), y, width, { fontSize: fontDetail });
+  y += 24;
+
+  if (payload.cancelledCount && payload.cancelledCount > 0) {
+    drawTwoColumn(
+      ctx,
+      "Hủy trong ca:",
+      `${payload.cancelledCount} đơn (${formatVnd(payload.cancelledAmount ?? 0)})`,
+      y,
+      width,
+      { fontSize: fontDetail },
+    );
+    y += 24;
+  }
+
+  if (payload.discountAmount && payload.discountAmount > 0) {
+    drawTwoColumn(
+      ctx,
+      "Tổng giảm giá:",
+      formatVnd(payload.discountAmount),
+      y,
+      width,
+      { fontSize: fontDetail },
+    );
+    y += 24;
+  }
+
   drawSolidLine(ctx, y, width, 2);
   y += 20;
 

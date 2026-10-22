@@ -124,6 +124,11 @@ export interface ZReportPayload {
   discrepancy: number;
   explanation?: string | null;
   storeName?: string;
+  invoiceCount?: number;
+  orderCount?: number;
+  cancelledCount?: number;
+  cancelledAmount?: number;
+  discountAmount?: number;
 }
 
 export interface PickupTicketPayload {

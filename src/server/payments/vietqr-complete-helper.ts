@@ -1,6 +1,6 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
-import { orders, orderItems, tables, menuItems, auditLogs } from "@/db/schema";
+import { orders, orderItems, tables, menuItems, auditLogs, shifts } from "@/db/schema";
 import { TxAbortError } from "@/server/orders/tx-abort-error";
 import { generateNextQueueNumber } from "./queue-number-service";
 import { getPrinterSettings } from "@/server/printing/settings-service";
@@ -50,6 +50,18 @@ export async function executeVietQrPaymentCompletion(
 
   try {
     await db.transaction(async (tx) => {
+      // 0. Lock shift FOR SHARE to verify it is still DANG_MO
+      const [currentShift] = await tx
+        .select({ id: shifts.id, status: shifts.status })
+        .from(shifts)
+        .where(eq(shifts.id, shiftId))
+        .limit(1)
+        .for("share");
+
+      if (!currentShift || currentShift.status !== "DANG_MO") {
+        throw new TxAbortError("Ca làm việc đã kết thúc hoặc không ở trạng thái Đang mở", 409);
+      }
+
       // 1. Lock order for update
       const [order] = await tx
         .select()
