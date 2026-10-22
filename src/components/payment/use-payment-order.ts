@@ -75,6 +75,7 @@ export function usePaymentOrder(orderId: number) {
     printPickupTicket,
     setPrintPickupTicket,
     paymentSuccessData,
+    setPaymentSuccessData,
     fetchOrder,
     handleCashPayment,
   };

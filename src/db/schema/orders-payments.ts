@@ -1,4 +1,4 @@
-import { pgTable, serial, varchar, integer, boolean, timestamp, uniqueIndex, index, check } from "drizzle-orm/pg-core";
+import { pgTable, serial, varchar, integer, boolean, timestamp, uniqueIndex, index, check, text } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { tables } from "./areas-tables";
 import { shifts } from "./shifts-cash";
@@ -128,15 +128,21 @@ export const payments = pgTable(
     cashGiven: integer("cash_given"), // For cash payments: Tiền khách đưa
     cashReturned: integer("cash_returned"), // For cash payments: Tiền thối lại
     vietqrRef: varchar("vietqr_ref", { length: 100 }), // Transaction reference
-    status: varchar("status", { length: 20 }).notNull().default("SUCCESS"), // PENDING | SUCCESS | FAILED | VOIDED
+    qrContent: text("qr_content"), // Full EMVCo VietQR string
+    sepayTransactionId: varchar("sepay_transaction_id", { length: 100 }), // SePay webhook transaction ID for idempotency
+    expiresAt: timestamp("expires_at", { withTimezone: true }), // VietQR timeout (3 minutes / +180s per BR-11)
+    status: varchar("status", { length: 20 }).notNull().default("SUCCESS"), // PENDING | SUCCESS | FAILED | VOIDED | EXPIRED
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("payments_order_id_idx").on(table.orderId),
     index("payments_shift_id_idx").on(table.shiftId),
+    uniqueIndex("payments_sepay_tx_unique")
+      .on(table.sepayTransactionId)
+      .where(sql`sepay_transaction_id IS NOT NULL`),
     check("payments_payment_method_check", sql`${table.paymentMethod} IN ('TIEN_MAT', 'VIETQR')`),
     check("payments_amount_check", sql`${table.amount} > 0`),
-    check("payments_status_check", sql`${table.status} IN ('PENDING', 'SUCCESS', 'FAILED', 'VOIDED')`),
+    check("payments_status_check", sql`${table.status} IN ('PENDING', 'SUCCESS', 'FAILED', 'VOIDED', 'EXPIRED')`),
   ],
 );
 

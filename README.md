@@ -239,3 +239,33 @@ Hệ thống cung cấp quy trình thanh toán tiền mặt tại quầy & tại
 - Màn hình bán hàng nhanh tại quầy (`/counter`), phục vụ khách mua mang về không gắn bàn (`orderType: 'TAKEAWAY'`).
 - Tích hợp giỏ hàng chạm cảm ứng, phím tăng/giảm số lượng nhanh, chọn món ăn kèm, ghi chú món ăn.
 - Tích hợp ngăn kéo xem danh sách "Hóa đơn trong ca" (`ShiftInvoicesDrawer`) giúp thu ngân tra cứu nhanh doanh thu ca, thực hiện in lại hóa đơn hoặc hủy hóa đơn nhanh chóng ngay tại quầy.
+
+## 8. Thanh toán chuyển khoản VietQR Động & Tích hợp Webhook SePay (Phase 08)
+
+Hệ thống tích hợp thanh toán VietQR động chuẩn EMVCo và cổng Webhook SePay tự động đối soát giao dịch (US-08, FR-12, BR-11, DEC-06, DEC-11, ERR-09, AC-08-1, AC-08-2, AC-08-3).
+
+### 8.1 Chuẩn sinh VietQR EMVCo & Kiểm tra CRC16
+- **Cấu trúc chuẩn**: Sinh mã QR chuẩn EMVCo Tag-Length-Value (TLV) chứa mã BIN ngân hàng thụ hưởng (`VIETQR_BANK_BIN`), số tài khoản (`VIETQR_ACCOUNT_NO`), số tiền thanh toán chính xác, nội dung chuyển khoản cô đọng (`HDxxxx`), và mã kiểm tra checksum `CRC16-CCITT` (0xFFFF).
+- **Nội dung chuyển khoản**: Rút gọn mã đơn hàng sang tiền tố `HD` kèm số thứ tự (ví dụ: `HD-20261020-0012` rút gọn thành `HD0012`) để khách hàng quét mã và ứng dụng ngân hàng tự động điền đúng cú pháp.
+
+### 8.2 Cơ chế Polling & Hạn giờ giao dịch 180 giây (AC-08-3, ERR-09)
+- **Hạn giờ 180s**: Bản ghi `payments` được tạo với trạng thái `PENDING` và `expires_at = now() + 180s`.
+- **Giao diện đếm ngược**: Component `VietqrBox` hiển thị đồng hồ đếm ngược `Statistic.Countdown` 3 phút. Khi hết thời gian:
+  - Mã QR hiển thị overlay `status="expired"` cùng nút "Lấy mã mới" (`onRefresh`).
+  - Hiển thị thông báo cảnh báo `ERR-09`: *"Mã VietQR đã hết hạn sau 3 phút. Vui lòng bấm 'Lấy mã mới' để tạo mã thanh toán mới!"*.
+- **Endpoint Polling**: `GET /api/v1/payments/:id` hỗ trợ frontend kiểm tra định kỳ trạng thái thanh toán, tự động chuyển trạng thái bản ghi sang `EXPIRED` khi hết thời gian mà chưa có tiền về.
+
+### 8.3 Webhook SePay & Đối soát tự động (AC-08-1, BR-11)
+- **Xác thực an toàn**: API `POST /api/v1/webhooks/sepay` kiểm tra xác thực khóa bí mật qua tiêu đề `Authorization: Apikey <SEPAY_WEBHOOK_SECRET>`.
+- **Tính Idempotent**: Khóa giao dịch dựa trên mã định danh giao dịch duy nhất từ SePay (`sepay_transaction_id`). Các webhook gửi lặp lại sẽ được bỏ qua an toàn mà không nhân đôi nghiệp vụ.
+- **Đối soát khớp**:
+  - Tự động bóc tách mã đơn hàng từ nội dung chuyển khoản và so khớp số tiền thực nhận với `final_amount`.
+  - Nếu khớp: Thực thi chung logic hoàn tất thanh toán của Phase 07 (`DA_THANH_TOAN`, cấp số thứ tự lấy đồ `queue_number`, kích mở két tiền `RJ12`, in hóa đơn, mở bàn).
+  - Đối soát tiền về sau 180s: Trường hợp tiền chuyển về muộn sau khi mã QR đã hết hạn (`EXPIRED`), hệ thống vẫn tự động so khớp và hoàn tất đơn hàng thành công.
+- **Xử lý sai lệch (Unmatched Transactions)**:
+  - Trường hợp thiếu tiền hoặc nội dung chuyển khoản không tìm thấy đơn hàng tương ứng: Hệ thống tự động ghi nhận vào bảng `unmatched_transactions` với trạng thái `PENDING_REVIEW` để quản lý kiểm tra đối soát thủ công.
+
+### 8.4 Xác nhận thủ công dự phòng & Cờ tính năng
+- **Xác nhận thủ công dự phòng**: Cung cấp nút và Modal "Xác nhận đã nhận tiền (Dự phòng)" (`POST /api/v1/payments/vietqr/manual-confirm`) có ghi nhận nhật ký kiểm toán `audit_logs` (`action: "MANUAL_VIETQR_CONFIRM"`) và bắt buộc nhập lý do tối thiểu 5 ký tự khi hệ thống SePay gặp sự cố mạng.
+- **Cờ cấu hình tắt/mở**: Biến môi trường `VIETQR_ENABLED` và `NEXT_PUBLIC_VIETQR_ENABLED` cho phép ẩn hoàn toàn tab thanh toán VietQR trên giao diện POS khi quán chỉ sử dụng tiền mặt.
+

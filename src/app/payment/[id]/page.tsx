@@ -22,6 +22,7 @@ import {
 import { MainLayout } from "@/components/main-layout";
 import { PaymentSummary } from "@/components/payment/payment-summary";
 import { CashTenderBox } from "@/components/payment/cash-tender-box";
+import { VietQrBox } from "@/components/payment/vietqr-box";
 import { PaymentResultView } from "@/components/payment/payment-result-view";
 import { usePaymentOrder } from "@/components/payment/use-payment-order";
 
@@ -36,6 +37,7 @@ export default function PaymentPage({ params }: PageProps) {
   const orderId = Number(resolvedParams.id);
   const router = useRouter();
 
+  const isVietQrConfigured = process.env.NEXT_PUBLIC_VIETQR_ENABLED !== "false";
   const [paymentMethod, setPaymentMethod] = useState<string>("TIEN_MAT");
 
   const {
@@ -47,6 +49,7 @@ export default function PaymentPage({ params }: PageProps) {
     printPickupTicket,
     setPrintPickupTicket,
     paymentSuccessData,
+    setPaymentSuccessData,
     handleCashPayment,
   } = usePaymentOrder(orderId);
 
@@ -136,18 +139,19 @@ export default function PaymentPage({ params }: PageProps) {
               ),
               value: "TIEN_MAT",
             },
-            {
-              label: (
-                <Tooltip title="Chức năng thanh toán VietQR / SePay sẽ được kích hoạt tại Phase 08">
-                  <Space style={{ padding: "4px 12px", color: "#bfbfbf" }}>
-                    <QrcodeOutlined />
-                    <span>Chuyển khoản VietQR (Phase 08)</span>
-                  </Space>
-                </Tooltip>
-              ),
-              value: "VIETQR",
-              disabled: true,
-            },
+            ...(isVietQrConfigured
+              ? [
+                  {
+                    label: (
+                      <Space style={{ padding: "4px 12px" }}>
+                        <QrcodeOutlined />
+                        <span>Chuyển khoản VietQR</span>
+                      </Space>
+                    ),
+                    value: "VIETQR",
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
@@ -168,6 +172,19 @@ export default function PaymentPage({ params }: PageProps) {
               isTakeaway={order.orderType === "MANG_VE"}
               printPickupTicket={printPickupTicket}
               onPrintPickupTicketChange={setPrintPickupTicket}
+            />
+          )}
+
+          {paymentMethod === "VIETQR" && isVietQrConfigured && (
+            <VietQrBox
+              orderId={order.id}
+              finalAmount={order.finalAmount}
+              orderCode={order.orderCode}
+              expectedVersion={order.version}
+              isTakeaway={order.orderType === "MANG_VE"}
+              printPickupTicket={printPickupTicket}
+              onPrintPickupTicketChange={setPrintPickupTicket}
+              onPaymentSuccess={(data) => setPaymentSuccessData(data)}
             />
           )}
         </Col>
