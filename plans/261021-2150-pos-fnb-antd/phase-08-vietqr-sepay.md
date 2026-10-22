@@ -1,7 +1,7 @@
 ---
 phase: 08
 title: VietQR động và webhook SePay
-status: pending
+status: completed
 priority: P1
 depends: [07]
 ---

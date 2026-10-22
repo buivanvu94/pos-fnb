@@ -1,7 +1,7 @@
 ---
 phase: 05
 title: In KOT, phiếu tạm tính, hóa đơn, mở két
-status: pending
+status: completed
 priority: P1
 depends: [04]
 ---

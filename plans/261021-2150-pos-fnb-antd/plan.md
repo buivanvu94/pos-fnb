@@ -1,7 +1,7 @@
 ---
 title: "POS F&B (quán ăn, cafe) trên Next.js + Ant Design"
 description: "Xây mới POS F&B theo bộ BA trong ba/: bán tại bàn và tại quầy, ca và quỹ tiền mặt, PIN quản lý, VietQR/SePay, in ESC/POS, báo cáo doanh thu; giao diện hoàn toàn bằng Ant Design."
-status: pending
+status: in-progress
 priority: P1
 effort: ~51 SP story + nền tảng (ước 5-6 tuần một dev)
 tags: [feature, frontend, backend, database, api, auth]
@@ -96,3 +96,20 @@ tests/{unit,api,e2e}
 4. Bộ đếm sai PIN tính theo người đang thao tác hay theo từng Quản lý có PIN? Mặc định: theo người đang đăng nhập thao tác.
 5. Phiên bản Ant Design: bản 6 như v-prd hay 5? Mặc định: bản ổn định mới nhất, xác nhận khi scaffold.
 6. Xóa hóa đơn "đang phục vụ" (SRS FR-10 "xóa/hủy đơn") và Void bill sau thanh toán (DEC-12) dùng chung luồng PIN; đồng ý?
+
+## Tình trạng thực hiện (2026-10-22)
+
+Phase 01-10 hoàn tất và đã merge. Phase 11 đã làm phần mã và tài liệu: đồng bộ outbox với retry có trần, huy hiệu trạng thái, e2e Playwright (13 kịch bản), test đối chiếu 9 endpoint với OpenAPI, script sao lưu, `docs/deployment-guide.md`. Plan giữ trạng thái `in-progress` vì còn các việc cần máy thật hoặc người nghiệm thu:
+
+- [ ] In thử trên máy in 80mm và 58mm thật, đo Gửi Bếp đến khi ra phiếu (NFR, < 2.5 s).
+- [ ] Chạy hết `ba/06-test-checklist.md` và `ba/07-test-cases.md` bằng tay; ghi kết quả.
+- [ ] Chạy e2e trên Edge (`E2E_EDGE=1`) và màn hình cảm ứng 15-21".
+- [ ] Chuyển khoản thật số nhỏ qua tài khoản thử SePay; dựng đường vào công khai cho webhook.
+- [ ] Chạy thử 3 ngày song song với sổ tay, thử khôi phục từ bản sao lưu, Quản lý nghiệm thu Z-Report.
+
+Câu hỏi mở phát sinh khi làm:
+
+1. ERR-05: AC-10-3 ghi `-50,000` nhưng định dạng vi-VN cho ra `-50.000`. Chốt định dạng nào?
+2. ERR-04 chỉ đếm bàn chưa thanh toán; đơn mang về còn dang dở có chặn kết ca không (hiện không chặn).
+3. Phía nhận đồng bộ trên đám mây (câu hỏi mở 2 ở trên) vẫn chưa có.
+4. Nút xác nhận VietQR thủ công đang yêu cầu PIN Quản lý và lý do; Chủ quán có đồng ý giữ dự phòng này không.

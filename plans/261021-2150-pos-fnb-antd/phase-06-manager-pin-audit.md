@@ -1,7 +1,7 @@
 ---
 phase: 06
 title: PIN quản lý và nhật ký kiểm toán
-status: pending
+status: completed
 priority: P1
 depends: [04, 05]
 ---

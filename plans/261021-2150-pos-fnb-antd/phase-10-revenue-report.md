@@ -1,7 +1,7 @@
 ---
 phase: 10
 title: Báo cáo doanh thu
-status: pending
+status: completed
 priority: P2
 depends: [07]
 ---

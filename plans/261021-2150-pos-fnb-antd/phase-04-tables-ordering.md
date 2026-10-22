@@ -1,7 +1,7 @@
 ---
 phase: 04
 title: Sơ đồ bàn, gọi món, chuyển/gộp bàn
-status: pending
+status: completed
 priority: P1
 depends: [02, 03]
 ---

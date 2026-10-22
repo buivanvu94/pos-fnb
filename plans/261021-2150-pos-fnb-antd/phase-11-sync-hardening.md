@@ -1,7 +1,7 @@
 ---
 phase: 11
 title: Đồng bộ outbox, kiểm thử tổng, triển khai
-status: pending
+status: in-progress
 priority: P1
 depends: [01, 02, 03, 04, 05, 06, 07, 08, 09, 10]
 ---

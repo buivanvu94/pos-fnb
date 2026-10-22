@@ -1,7 +1,7 @@
 ---
 phase: 07
 title: Thanh toán tiền mặt và bán tại quầy
-status: pending
+status: completed
 priority: P1
 depends: [05, 06]
 ---

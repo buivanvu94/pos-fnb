@@ -1,7 +1,7 @@
 ---
 phase: 03
 title: Mở ca và thu/chi trong ca
-status: pending
+status: completed
 priority: P1
 depends: [01]
 ---

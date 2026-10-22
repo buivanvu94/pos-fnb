@@ -1,7 +1,7 @@
 ---
 phase: 02
 title: Quản lý thực đơn
-status: pending
+status: completed
 priority: P1
 depends: [01]
 ---

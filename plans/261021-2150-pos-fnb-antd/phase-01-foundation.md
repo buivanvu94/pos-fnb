@@ -1,7 +1,7 @@
 ---
 phase: 01
 title: Nền tảng
-status: pending
+status: completed
 priority: P1
 depends: []
 ---

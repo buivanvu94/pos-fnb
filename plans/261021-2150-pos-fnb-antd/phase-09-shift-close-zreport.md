@@ -1,7 +1,7 @@
 ---
 phase: 09
 title: Kết ca, Z-Report, Telegram
-status: pending
+status: completed
 priority: P1
 depends: [07]
 ---
