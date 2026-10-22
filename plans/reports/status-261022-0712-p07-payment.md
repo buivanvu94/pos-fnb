@@ -127,18 +127,18 @@ Văn bản yêu cầu: [phase-07-payment-cash-takeaway.md](file:///C:/Users/Admi
 
 ---
 
-## 4. Danh sách Câu hỏi Chưa giải quyết (Unresolved Questions)
+## 4. Các Vấn đề Đã Thống nhất & Giải quyết (Resolved Inquiries)
 
-1. **In phiếu nhận đồ cho đơn mang về không có đồ uống/bếp**: Khi đơn mang về chỉ gồm các món đóng gói sẵn không qua bếp/bar chế biến, hệ thống vẫn in phiếu nhận đồ `PICKUP_TICKET` theo mặc định hay có cần tùy chọn bỏ qua? (Mặc định: Luôn in `PICKUP_TICKET` để khách có số thứ tự đối chiếu nhận đồ).
-2. **Số thứ tự `queue_number` khi qua ngày mới**: Khóa đánh số thứ tự tính theo ngày `queue_date` (định dạng `YYYY-MM-DD`). Trong trường hợp ca làm việc mở xuyên đêm (ví dụ từ 22:00 ngày hôm trước đến 03:00 ngày hôm sau), số thứ tự sẽ tự động quay về 1 khi thời điểm thanh toán bước sang ngày mới. Xác nhận phương án này là phù hợp với nghiệp vụ quán?
+1. **In phiếu nhận đồ cho đơn mang về không qua chế biến**: Đã hoàn thành bổ sung tùy chọn `printPickupTicket?: boolean` (mặc định `true`), tích hợp ô chọn `Checkbox` trên giao diện thu ngân `/payment/[id]` cho phép bỏ qua in phiếu nhận đồ đối với đơn mang về chỉ gồm các món đóng gói sẵn.
+2. **Số thứ tự `queue_number` khi qua ngày mới**: Đã thống nhất và xác nhận cơ chế cấp số thứ tự theo ngày `queue_date` (`YYYY-MM-DD`) tự động quay về 1 khi bước qua 00:00 là hoàn toàn phù hợp với nghiệp vụ quán.
 
 ---
 
 ## 5. Kết quả Kiểm thử & Nghiệm thu Hoàn tất (Verification Summary)
 
-- **Vitest Test Suite**: 49/49 test files passed, 313/313 tests passed (100% green, 0 regressions trên database `pos_test_p07`).
+- **Vitest Test Suite**: 49/49 test files passed, 314/314 tests passed (100% green, 0 regressions trên database `pos_test_p07`).
   - `tests/api/payment-cash.test.ts`: 7/7 tests pass.
-  - `tests/api/payment-takeaway.test.ts`: 3/3 tests pass (bao gồm kiểm thử đa luồng 10 thanh toán đồng thời cấp số thứ tự `queue_number` duy nhất).
+  - `tests/api/payment-takeaway.test.ts`: 4/4 tests pass (bao gồm kiểm thử đa luồng 10 thanh toán đồng thời cấp số thứ tự `queue_number` duy nhất và kiểm thử tùy chọn bỏ qua phiếu lấy đồ `printPickupTicket: false`).
   - `tests/api/payment-provisional-reprint.test.ts`: 4/4 tests pass.
   - `tests/api/payment-void-bill.test.ts`: 6/6 tests pass.
   - `tests/api/payment-immutability-br08.test.ts`: 8/8 tests pass (khóa chặn thêm, sửa, xóa, giảm giá, hủy sau thanh toán).

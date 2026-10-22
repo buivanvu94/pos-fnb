@@ -17,6 +17,7 @@ const cashPaymentSchema = z.object({
     })
     .int()
     .min(1, { message: "expectedVersion phải lớn hơn 0" }),
+  printPickupTicket: z.boolean().optional(),
 });
 
 /**
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest) {
       expectedVersion: parsed.data.expectedVersion,
       user: shiftAuth.user,
       shift: shiftAuth.shift,
+      printPickupTicket: parsed.data.printPickupTicket,
     });
 
     if (!result.ok) {

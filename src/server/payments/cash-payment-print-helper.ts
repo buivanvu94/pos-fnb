@@ -27,6 +27,7 @@ export interface PreparePrintJobsParams {
   cashReturned: number;
   queueNumber: number | null;
   queueDate: string | null;
+  printPickupTicket?: boolean;
 }
 
 export interface EnqueuedJobsResult {
@@ -53,6 +54,7 @@ export async function enqueuePaymentPrintJobs(
     cashReturned,
     queueNumber,
     queueDate,
+    printPickupTicket,
   } = params;
 
   const receiptItems: ReceiptItemPayload[] = activeItems.map((item) => ({
@@ -100,7 +102,7 @@ export async function enqueuePaymentPrintJobs(
   const printJobsToDispatch: number[] = [receiptJob.id];
   let pickupTicketJobId: number | undefined;
 
-  if (order.orderType === "MANG_VE" && queueNumber !== null) {
+  if (order.orderType === "MANG_VE" && queueNumber !== null && printPickupTicket !== false) {
     const pickupPayload: PickupTicketPayload = {
       kind: "PICKUP_TICKET",
       orderId: order.id,

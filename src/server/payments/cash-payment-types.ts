@@ -9,6 +9,7 @@ export interface CashPaymentParams {
   expectedVersion: number;
   user: TokenPayload;
   shift: Shift;
+  printPickupTicket?: boolean;
 }
 
 export interface CashPaymentResult {

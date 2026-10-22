@@ -209,8 +209,8 @@ Hệ thống cung cấp quy trình thanh toán tiền mặt tại quầy & tại
   - Cập nhật đơn hàng: `status = 'DA_THANH_TOAN'`, `paymentStatus = 'PAID'`, `completedAt = now()`.
   - Khóa bàn: Đối với đơn tại bàn (`orderType = 'DINE_IN'`), tự động chuyển bàn về `BAN_TRONG` (trừ khi bàn có đơn ghép khác chưa thanh toán).
   - Bản ghi thanh toán: Tạo bản ghi trong bảng `payments` với trạng thái `COMPLETED`.
-  - Sinh số thứ tự lấy đồ (`queue_number`): Áp dụng khóa `pg_advisory_xact_lock(hashtext('queue_number_YYYY-MM-DD'))` để cấp số thứ tự 1..N duy nhất và không ngắt quãng trong ngày cho cả đơn tại quầy và mang về.
-  - Hàng đợi in: Tạo phiếu in hóa đơn thanh toán `RECEIPT_FINAL` (có cờ `kickDrawer: true` để kích xung mở két tiền) và phiếu lấy đồ `PICKUP_TICKET` cho khách mang về.
+  - Sinh số thứ tự lấy đồ (`queue_number`): Áp dụng khóa `pg_advisory_xact_lock(hashtext('queue_number_YYYY-MM-DD'))` để cấp số thứ tự 1..N duy nhất và không ngắt quãng trong ngày cho cả đơn tại quầy và mang về (tự động quay về 1 khi bước qua 00:00 ngày mới).
+  - Hàng đợi in: Tạo phiếu in hóa đơn thanh toán `RECEIPT_FINAL` (có cờ `kickDrawer: true` để kích xung mở két tiền) và phiếu lấy đồ `PICKUP_TICKET` cho khách mang về. Hỗ trợ tùy chọn bỏ qua in phiếu nhận đồ (`printPickupTicket: false`) qua checkbox trên giao diện thu ngân đối với đơn mang về chỉ gồm các món đóng gói sẵn không qua bếp/bar chế biến.
   - Ngăn chặn thanh toán kép đồng thời (Double Payment Protection): Sử dụng `expectedVersion` và khóa `FOR UPDATE` tuần tự hóa các yêu cầu thanh toán trùng lặp.
 
 ### 7.2 In phiếu tạm tính (Provisional Bill - FR-11)

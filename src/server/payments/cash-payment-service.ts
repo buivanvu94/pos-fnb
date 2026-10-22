@@ -22,7 +22,7 @@ export { MAX_CASH_AMOUNT, type CashPaymentParams, type CashPaymentResult };
  * Print failure does not rollback payment (BR-12, ERR-10).
  */
 export async function payOrderCash(params: CashPaymentParams): Promise<CashPaymentResult> {
-  const { orderId, tienKhachDua, expectedVersion, user, shift } = params;
+  const { orderId, tienKhachDua, expectedVersion, user, shift, printPickupTicket } = params;
 
   if (!Number.isInteger(tienKhachDua) || tienKhachDua < 0 || tienKhachDua > MAX_CASH_AMOUNT) {
     return {
@@ -160,6 +160,7 @@ export async function payOrderCash(params: CashPaymentParams): Promise<CashPayme
           cashReturned,
           queueNumber,
           queueDate,
+          printPickupTicket,
         },
         tx,
       );

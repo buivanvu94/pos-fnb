@@ -273,4 +273,57 @@ describe("Takeaway & Counter Payment API (US-05, FR-05, BR-10, ERR-08, AC-05-1, 
     const uniqueNumbers = new Set(queueNumbers);
     expect(uniqueNumbers.size).toBe(10);
   });
+
+  it("allows skipping PICKUP_TICKET when printPickupTicket is explicitly set to false", async () => {
+    // 1. Create takeaway order
+    const orderReq = new NextRequest("http://localhost:3000/api/v1/orders", {
+      method: "POST",
+      headers: {
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ orderType: "MANG_VE" }),
+    });
+    const orderRes = await createOrderHandler(orderReq);
+    const orderJson = await orderRes.json();
+    const orderId = orderJson.data.id;
+    createdOrderIds.push(orderId);
+
+    // 2. Add item
+    await db.insert(schema.orderItems).values({
+      orderId,
+      menuItemId: milkTeaItemId,
+      quantity: 1,
+      unitPrice: 35_000,
+      isPrintedKitchen: false,
+      isCancelled: false,
+    });
+    await db.update(schema.orders).set({ totalAmount: 35_000, finalAmount: 35_000 }).where(eq(schema.orders.id, orderId));
+
+    // 3. Pay with printPickupTicket: false
+    const payReq = new NextRequest("http://localhost:3000/api/v1/payments/cash", {
+      method: "POST",
+      headers: {
+        Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        orderId,
+        tienKhachDua: 35_000,
+        expectedVersion: 1,
+        printPickupTicket: false,
+      }),
+    });
+
+    const payRes = await cashPaymentHandler(payReq);
+    expect(payRes.status).toBe(200);
+
+    // 4. Verify print jobs: RECEIPT_FINAL exists, but PICKUP_TICKET does NOT exist
+    const jobs = await db.select().from(schema.printJobs).where(eq(schema.printJobs.orderId, orderId));
+    const finalJob = jobs.find((j) => j.jobType === "RECEIPT_FINAL");
+    const pickupJob = jobs.find((j) => j.jobType === "PICKUP_TICKET");
+
+    expect(finalJob).toBeDefined();
+    expect(pickupJob).toBeUndefined();
+  });
 });

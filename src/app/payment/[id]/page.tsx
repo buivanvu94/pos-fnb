@@ -44,6 +44,8 @@ export default function PaymentPage({ params }: PageProps) {
     cashGiven,
     setCashGiven,
     submitting,
+    printPickupTicket,
+    setPrintPickupTicket,
     paymentSuccessData,
     handleCashPayment,
   } = usePaymentOrder(orderId);
@@ -163,6 +165,9 @@ export default function PaymentPage({ params }: PageProps) {
               onCashGivenChange={setCashGiven}
               onSubmit={handleCashPayment}
               loading={submitting}
+              isTakeaway={order.orderType === "MANG_VE"}
+              printPickupTicket={printPickupTicket}
+              onPrintPickupTicketChange={setPrintPickupTicket}
             />
           )}
         </Col>

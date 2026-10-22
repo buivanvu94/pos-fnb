@@ -1,5 +1,5 @@
 import React from "react";
-import { Card, InputNumber, Space, Button, Typography, Statistic } from "antd";
+import { Card, InputNumber, Space, Button, Typography, Statistic, Checkbox } from "antd";
 import { CheckOutlined } from "@ant-design/icons";
 import { formatVnd } from "@/lib/money";
 
@@ -11,6 +11,9 @@ interface CashTenderBoxProps {
   onCashGivenChange: (val: number) => void;
   onSubmit: () => void;
   loading: boolean;
+  isTakeaway?: boolean;
+  printPickupTicket?: boolean;
+  onPrintPickupTicketChange?: (val: boolean) => void;
 }
 
 const COMMON_DENOMINATIONS = [50_000, 100_000, 200_000, 500_000];
@@ -21,6 +24,9 @@ export function CashTenderBox({
   onCashGivenChange,
   onSubmit,
   loading,
+  isTakeaway,
+  printPickupTicket = true,
+  onPrintPickupTicketChange,
 }: CashTenderBoxProps) {
   const changeDue = Math.max(0, cashGiven - finalAmount);
   const isShort = cashGiven < finalAmount;
@@ -91,6 +97,17 @@ export function CashTenderBox({
           }}
         />
       </div>
+
+      {isTakeaway && (
+        <div style={{ marginBottom: 16 }}>
+          <Checkbox
+            checked={printPickupTicket}
+            onChange={(e) => onPrintPickupTicketChange?.(e.target.checked)}
+          >
+            In phiếu lấy đồ (cho khách mang về)
+          </Checkbox>
+        </div>
+      )}
 
       <Button
         type="primary"

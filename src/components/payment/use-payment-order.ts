@@ -11,6 +11,7 @@ export function usePaymentOrder(orderId: number) {
   const [loading, setLoading] = useState(true);
   const [cashGiven, setCashGiven] = useState<number>(0);
   const [submitting, setSubmitting] = useState(false);
+  const [printPickupTicket, setPrintPickupTicket] = useState(true);
   const [paymentSuccessData, setPaymentSuccessData] = useState<any | null>(null);
 
   const fetchOrder = useCallback(async () => {
@@ -47,6 +48,7 @@ export function usePaymentOrder(orderId: number) {
           orderId: order.id,
           tienKhachDua: cashGiven,
           expectedVersion: order.version,
+          printPickupTicket,
         }),
       });
 
@@ -70,6 +72,8 @@ export function usePaymentOrder(orderId: number) {
     cashGiven,
     setCashGiven,
     submitting,
+    printPickupTicket,
+    setPrintPickupTicket,
     paymentSuccessData,
     fetchOrder,
     handleCashPayment,
