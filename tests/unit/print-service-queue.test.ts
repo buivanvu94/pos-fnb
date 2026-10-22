@@ -230,38 +230,46 @@ describe("Print Queue, Atomic Claim & Retry Authorization Unit Tests (Point 2 & 
   });
 
   it("Point 5: dispatching to unconfigured printer returns FAILED with ERR-06 and no network call", async () => {
-    // Unconfigure bar printer IP
-    await savePrinterSettings({ barIp: "" });
+    const origBarEnv = process.env.PRINTER_BAR_IP;
+    delete process.env.PRINTER_BAR_IP;
+    try {
+      // Unconfigure bar printer IP
+      await savePrinterSettings({ barIp: "" });
 
-    const job = await enqueuePrintJob({
-      orderId: null,
-      jobType: "KOT_BAR",
-      targetPrinter: "BAR",
-      payload: {
-        kind: "KOT",
-        orderId: 105,
-        orderCode: "HD-NO-IP",
-        tableName: "Bàn 5",
-        senderName: "Phục vụ",
-        sentAt: new Date().toISOString(),
-        targetStation: "BAR",
-        items: [{ name: "Sinh tố xoài", quantity: 1, unitPrice: 40000 }],
-      },
-    });
-    createdJobIds.push(job.id);
+      const job = await enqueuePrintJob({
+        orderId: null,
+        jobType: "KOT_BAR",
+        targetPrinter: "BAR",
+        payload: {
+          kind: "KOT",
+          orderId: 105,
+          orderCode: "HD-NO-IP",
+          tableName: "Bàn 5",
+          senderName: "Phục vụ",
+          sentAt: new Date().toISOString(),
+          targetStation: "BAR",
+          items: [{ name: "Sinh tố xoài", quantity: 1, unitPrice: 40000 }],
+        },
+      });
+      createdJobIds.push(job.id);
 
-    const res = await dispatchPrintJob(job.id);
-    expect(res.ok).toBe(false);
-    expect(res.status).toBe("FAILED");
-    expect(res.error).toBe("Chưa cấu hình IP cho máy in Quầy Bar");
-    expect(res.warningMessage).toBe(ERROR_CATALOG.ERR_06.message);
+      const res = await dispatchPrintJob(job.id);
+      expect(res.ok).toBe(false);
+      expect(res.status).toBe("FAILED");
+      expect(res.error).toBe("Chưa cấu hình IP cho máy in Quầy Bar");
+      expect(res.warningMessage).toBe(ERROR_CATALOG.ERR_06.message);
 
-    const [dbJob] = await db
-      .select()
-      .from(schema.printJobs)
-      .where(eq(schema.printJobs.id, job.id));
+      const [dbJob] = await db
+        .select()
+        .from(schema.printJobs)
+        .where(eq(schema.printJobs.id, job.id));
 
-    expect(dbJob.status).toBe("FAILED");
-    expect(dbJob.errorMessage).toBe("Chưa cấu hình IP cho máy in Quầy Bar");
+      expect(dbJob.status).toBe("FAILED");
+      expect(dbJob.errorMessage).toBe("Chưa cấu hình IP cho máy in Quầy Bar");
+    } finally {
+      if (origBarEnv !== undefined) {
+        process.env.PRINTER_BAR_IP = origBarEnv;
+      }
+    }
   });
 });
