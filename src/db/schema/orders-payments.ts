@@ -47,6 +47,7 @@ export const orders = pgTable(
       .where(sql`queue_number IS NOT NULL AND queue_date IS NOT NULL`),
     index("orders_shift_id_idx").on(table.shiftId),
     index("orders_table_id_idx").on(table.tableId),
+    index("orders_paid_at_idx").on(table.paidAt),
     check("orders_order_type_check", sql`${table.orderType} IN ('TAI_BAN', 'MANG_VE')`),
     check("orders_status_check", sql`${table.status} IN ('DANG_PHUC_VU', 'DA_THANH_TOAN', 'DA_HUY', 'DA_GOP')`),
     check("orders_total_amount_check", sql`${table.totalAmount} >= 0`),

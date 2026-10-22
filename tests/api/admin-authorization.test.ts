@@ -92,7 +92,7 @@ describe("Admin Route & Middleware Security Authorization", () => {
     expect(data.ok).toBe(true);
   });
 
-  it("revenue report endpoint returns 501 Not Implemented or 403 per permissions", async () => {
+  it("revenue report endpoint enforces role permissions (QUAN_LY/THU_NGAN 200, PHUC_VU/other cashier 403)", async () => {
     const waiterToken = await signAuthToken({
       userId: 3,
       username: "phucvu",
@@ -128,36 +128,34 @@ describe("Admin Route & Middleware Security Authorization", () => {
     );
     expect(otherRes.status).toBe(403);
 
-    // 3. Thu ngân querying own shift with cashierId=2 -> 501
+    // 3. Thu ngân querying own shift with cashierId=2 -> 200 OK
     const ownWithIdRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue?cashierId=2", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
       }),
     );
-    expect(ownWithIdRes.status).toBe(501);
+    expect(ownWithIdRes.status).toBe(200);
     const ownWithIdData = await ownWithIdRes.json();
-    expect(ownWithIdData.scope).toBe("OWN_SHIFT_REVENUE");
-    expect(ownWithIdData.code).toBe("NOT_IMPLEMENTED");
+    expect(ownWithIdData.ok).toBe(true);
 
-    // 4. Thu ngân querying without cashierId defaults to own shift -> 501
+    // 4. Thu ngân querying without cashierId defaults to own shift -> 200 OK
     const ownRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${cashierToken}` },
       }),
     );
-    expect(ownRes.status).toBe(501);
+    expect(ownRes.status).toBe(200);
     const ownData = await ownRes.json();
-    expect(ownData.scope).toBe("OWN_SHIFT_REVENUE");
+    expect(ownData.ok).toBe(true);
 
-    // 5. Quản lý -> 501 general report
+    // 5. Quản lý -> 200 OK general report
     const mgrRes = await revenueReportHandler(
       new NextRequest("http://localhost:3000/api/v1/reports/revenue", {
         headers: { Cookie: `${AUTH_COOKIE_NAME}=${managerToken}` },
       }),
     );
-    expect(mgrRes.status).toBe(501);
+    expect(mgrRes.status).toBe(200);
     const mgrData = await mgrRes.json();
-    expect(mgrData.scope).toBe("ALL_REVENUE");
-    expect(mgrData.code).toBe("NOT_IMPLEMENTED");
+    expect(mgrData.ok).toBe(true);
   });
 });
