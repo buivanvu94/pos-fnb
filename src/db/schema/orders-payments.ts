@@ -28,6 +28,12 @@ export const orders = pgTable(
     paymentMethod: varchar("payment_method", { length: 20 }), // TIEN_MAT | VIETQR
     status: varchar("status", { length: 20 }).notNull().default("DANG_PHUC_VU"), // DANG_PHUC_VU | DA_THANH_TOAN | DA_HUY | DA_GOP
     version: integer("version").notNull().default(1), // Optimistic concurrency lock
+    queueNumber: integer("queue_number"),
+    queueDate: varchar("queue_date", { length: 10 }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidedById: integer("voided_by_id").references(() => users.id, { onDelete: "set null" }),
+    voidReason: varchar("void_reason", { length: 255 }),
     createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -36,6 +42,9 @@ export const orders = pgTable(
     uniqueIndex("orders_table_active_unique")
       .on(table.tableId)
       .where(sql`status = 'DANG_PHUC_VU' AND table_id IS NOT NULL`),
+    uniqueIndex("orders_queue_date_number_unique")
+      .on(table.queueDate, table.queueNumber)
+      .where(sql`queue_number IS NOT NULL AND queue_date IS NOT NULL`),
     index("orders_shift_id_idx").on(table.shiftId),
     index("orders_table_id_idx").on(table.tableId),
     check("orders_order_type_check", sql`${table.orderType} IN ('TAI_BAN', 'MANG_VE')`),
@@ -119,7 +128,7 @@ export const payments = pgTable(
     cashGiven: integer("cash_given"), // For cash payments: Tiền khách đưa
     cashReturned: integer("cash_returned"), // For cash payments: Tiền thối lại
     vietqrRef: varchar("vietqr_ref", { length: 100 }), // Transaction reference
-    status: varchar("status", { length: 20 }).notNull().default("SUCCESS"), // PENDING | SUCCESS | FAILED
+    status: varchar("status", { length: 20 }).notNull().default("SUCCESS"), // PENDING | SUCCESS | FAILED | VOIDED
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -127,7 +136,7 @@ export const payments = pgTable(
     index("payments_shift_id_idx").on(table.shiftId),
     check("payments_payment_method_check", sql`${table.paymentMethod} IN ('TIEN_MAT', 'VIETQR')`),
     check("payments_amount_check", sql`${table.amount} > 0`),
-    check("payments_status_check", sql`${table.status} IN ('PENDING', 'SUCCESS', 'FAILED')`),
+    check("payments_status_check", sql`${table.status} IN ('PENDING', 'SUCCESS', 'FAILED', 'VOIDED')`),
   ],
 );
 

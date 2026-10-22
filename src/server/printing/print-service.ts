@@ -17,7 +17,8 @@ export type PrintJobType =
   | "RECEIPT_TEMP"
   | "RECEIPT_FINAL"
   | "Z_REPORT"
-  | "CASH_RECEIPT";
+  | "CASH_RECEIPT"
+  | "PICKUP_TICKET";
 
 export type TargetPrinterStation = "KITCHEN" | "BAR" | "RECEIPT";
 

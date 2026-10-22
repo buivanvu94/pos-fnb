@@ -8,6 +8,7 @@ import { renderKotCanvas, renderKotCancelCanvas } from "./templates/render-kot";
 import { renderProvisionalCanvas } from "./templates/render-provisional";
 import { renderFinalReceiptCanvas } from "./templates/render-final-receipt";
 import { renderCashReceiptCanvas, renderZReportCanvas } from "./templates/render-cash-z";
+import { renderPickupTicketCanvas } from "./templates/render-pickup-ticket";
 import { LOGO_FILENAME_REGEX } from "./settings-service";
 
 export type PaperWidth = 80 | 58;
@@ -59,6 +60,8 @@ export async function renderPayloadToCanvas(
       return renderCashReceiptCanvas(p as any, width);
     case "Z_REPORT":
       return renderZReportCanvas(p as any, width);
+    case "PICKUP_TICKET":
+      return renderPickupTicketCanvas(p as any, width);
     default: {
       // Point 9: Truncate error message from dumping huge JSON payload
       const previewStr = kind || JSON.stringify(payload).slice(0, 500);
