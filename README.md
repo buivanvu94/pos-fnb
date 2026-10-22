@@ -349,3 +349,14 @@ Hệ thống triển khai kiến trúc hàng đợi Outbox đồng bộ đám m�
 
 
 
+
+## 11. Kiểm thử E2E, sao lưu và triển khai (Phase 11)
+
+- **E2E Playwright** (`npm run test:e2e`): tự khởi động server riêng ở cổng 3100 trỏ vào cơ sở dữ liệu test (`DATABASE_TEST_URL`), không đụng dữ liệu thật. Lần đầu cần `npx playwright install chromium`; đặt `E2E_EDGE=1` để chạy thêm trên Edge.
+  - `tests/e2e/main-flow.spec.ts`: mở ca, gọi món, Gửi Bếp, tạm tính, thanh toán tiền mặt (kể cả thanh toán lặp bị chặn), thu/chi, VietQR bằng webhook SePay giả lập, kết ca, Quản lý nhập PIN duyệt, báo cáo doanh thu và phân quyền.
+  - `tests/e2e/resilience.spec.ts`: mất Internet (đích đồng bộ không với tới, sự kiện xếp hàng chờ, không lỗi vĩnh viễn), máy in không kết nối, hai máy cùng một bàn hoặc một đơn, F5 giữa chừng.
+  - Không chạy hai bộ test (Vitest hoặc Playwright) song song vì dùng chung một cơ sở dữ liệu test.
+- **Đối chiếu API**: `tests/unit/openapi-endpoint-parity.test.ts` kiểm tra 9 endpoint trong `ba/api/pos-fnb.openapi.yaml` đều có route và đúng phương thức.
+- **Sao lưu**: `scripts/backup-db.ps1` (pg_dump trong container, giữ 14 bản, không in mật khẩu).
+- **Chạy nhanh trên Windows**: `start.bat` (tạo `.env` nếu thiếu, bật Postgres, migrate, mở ứng dụng).
+- **Triển khai, biến môi trường, đặt lịch sao lưu, khôi phục, cổng sẵn sàng production**: xem [`docs/deployment-guide.md`](docs/deployment-guide.md).
