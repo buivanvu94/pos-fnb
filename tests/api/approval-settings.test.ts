@@ -10,6 +10,7 @@ import { POST as discountHandler } from "@/app/api/v1/orders/[id]/discount/route
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { setPinRequired, isPinRequired, APPROVAL_PIN_REQUIRED_KEY } from "@/server/approvals/approval-settings-service";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 
 describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Section 10)", () => {
   const testDbUrl = getTestDbUrl();
@@ -34,6 +35,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     db = drizzle(pool, { schema });
 
     initialPinRequired = await isPinRequired();
+    const managerPin = generateSafeTestPin();
 
     const [manager] = await db
       .insert(schema.users)
@@ -42,7 +44,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
         fullName: "Quản Lý Test Cấu Hình",
         role: "QUAN_LY",
         passwordHash: "dummy",
-        pinHash: await bcrypt.hash("8391", 10),
+        pinHash: await bcrypt.hash(managerPin, 10),
       })
       .returning();
     managerId = manager.id;
@@ -97,6 +99,7 @@ describe("Approval Settings API - GET & PUT /api/v1/settings/approval (SRS Secti
     await setPinRequired(initialPinRequired);
 
     if (db) {
+      await clearManagerPinHash(db, managerId);
       await db.delete(schema.auditLogs).where(eq(schema.auditLogs.entityType, "settings"));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, shiftId));
       await db.delete(schema.tables).where(eq(schema.tables.id, tableId));

@@ -62,6 +62,7 @@ export async function processOutbox(
       .where(
         and(
           eq(outbox.status, "PENDING"),
+          eq(outbox.type, "TELEGRAM_SHIFT_CLOSE"),
           or(isNull(outbox.nextAttemptAt), lte(outbox.nextAttemptAt, now)),
         ),
       )

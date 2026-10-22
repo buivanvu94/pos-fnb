@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { shifts } from "@/db/schema";
 import { requireRole } from "@/server/auth/require-role";
 import { generateShiftCode } from "@/db/code-generator";
+import { recordSyncShiftEvent } from "@/server/sync";
 
 const MAX_MONEY = 2_000_000_000;
 
@@ -92,6 +93,24 @@ export async function POST(req: NextRequest) {
           openedAt: new Date(),
         })
         .returning();
+
+      await recordSyncShiftEvent(
+        {
+          shiftId: inserted.id,
+          shiftCode: inserted.shiftCode,
+          cashierId: inserted.cashierId,
+          initialCash: inserted.initialCash,
+          actualCash: inserted.actualCash,
+          expectedCash: inserted.expectedCash,
+          difference: inserted.difference,
+          explanation: inserted.explanation,
+          status: inserted.status,
+          openedAt: inserted.openedAt.toISOString(),
+          closedAt: null,
+          approvedById: null,
+        },
+        tx as any,
+      );
 
       return inserted;
     });

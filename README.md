@@ -320,4 +320,26 @@ Hệ thống cung cấp quy trình kết ca làm việc 3 bước chuẩn F&B, k
   - Tuyệt đối bảo mật: Bot token chỉ lấy từ biến môi trường, không bao giờ được log hay trả về trong response/lỗi.
   - Cơ chế retry lũy thừa (exponential backoff, tối đa N lần). Thất bại gửi Telegram không chặn việc đóng ca và có thể kích hoạt xử lý lại qua endpoint `POST /api/v1/shifts/outbox` hoặc hàm `processOutbox()`.
 
+## 10. Đồng bộ Đám mây Outbox (Phase 11 — NFR-04, DEC-10)
+
+Hệ thống triển khai kiến trúc hàng đợi Outbox đồng bộ đám mây offline-first, đảm bảo POS hoạt động trơn tru trên mạng LAN khi mất Internet và tự động đồng bộ khi có kết nối trở lại.
+
+### 10.1 Các loại sự kiện đồng bộ
+- `SYNC_INVOICE`: Ghi nhận hóa đơn đã thanh toán (tiền mặt, VietQR) hoặc bị hủy/void bill.
+- `SYNC_SHIFT`: Ghi nhận trạng thái ca làm việc (mở ca `DANG_MO`, kết ca `CHO_DUYET`, duyệt ca `DA_DONG`).
+- `SYNC_CASH_TXN`: Ghi nhận các khoản thu/chi tiền mặt khẩn cấp trong ca.
+- `SYNC_AUDIT`: Ghi nhận nhật ký kiểm toán nhạy cảm (hủy món, giảm giá, hủy đơn, khóa tài khoản, đổi PIN).
+- Toàn bộ sự kiện được ghi nhận trong **cùng database transaction** với nghiệp vụ, cam kết tính nguyên tử (rollback nghiệp vụ thì không ghi event) và tính idempotent qua `idempotency_key` duy nhất theo thực thể và phiên bản.
+
+### 10.2 Worker đồng bộ & Cấu hình
+- **Hàm xử lý `processSyncOutbox()`**: Quét và claim bản ghi `PENDING` bằng `SELECT ... FOR UPDATE SKIP LOCKED` kết hợp lease time chống trùng giữa nhiều worker.
+- **Gửi HTTP**: Đẩy POST JSON tới `SYNC_TARGET_URL` kèm header `Idempotency-Key` và tùy chọn `SYNC_API_KEY` (không log, không trả về). Hỗ trợ retry lũy thừa có giới hạn và timeout 30 giây.
+- **Dung sai khi chưa cấu hình**: Nếu `SYNC_TARGET_URL` để trống, worker giữ nguyên sự kiện ở trạng thái `PENDING` và trả về số lượng chờ mà không gây lỗi hệ thống.
+- **Điểm kích hoạt**: Có thể chạy thủ công qua `POST /api/v1/sync/run` (chỉ dành cho `QUAN_LY`) hoặc chạy nền định kỳ qua Next.js instrumentation hook (`src/instrumentation.ts`) khi bật cờ `SYNC_WORKER_ENABLED=true`.
+
+### 10.3 Giám sát trạng thái trên POS
+- **API `GET /api/v1/sync/status`**: Cung cấp số lượng bản ghi `{ pending, failed, lastSyncedAt, configured }` cho mọi nhân viên đã đăng nhập.
+- **Badge giao diện**: Hiển thị trạng thái "Đã đồng bộ" (xanh lá) hoặc "Còn N bản chờ đồng bộ" (vàng/cam) trên thanh tiêu đề `MainLayout` với chu kỳ thăm dò 30 giây. Không cung cấp nút bấm xác nhận thủ công (DEC-10) và không chặn bất kỳ thao tác bán hàng nào của thu ngân khi mất mạng.
+
+
 

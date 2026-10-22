@@ -11,6 +11,7 @@ import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 import { setPinRequired, isPinRequired } from "@/server/approvals/approval-settings-service";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 
 describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2, BR-03, FR-10)", () => {
   const testDbUrl = getTestDbUrl();
@@ -34,7 +35,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
   let barItemId: number;
   let initialPinRequired: boolean;
 
-  const CORRECT_PIN = "8391";
+  const CORRECT_PIN = generateSafeTestPin();
   const WRONG_PIN = "0000";
 
   async function createTestOrder(totalAmount = 50000) {
@@ -168,6 +169,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
     await setPinRequired(initialPinRequired);
 
     if (db) {
+      await clearManagerPinHash(db, managerId);
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, kitchenItemId));
       await db.delete(schema.orderItems).where(eq(schema.orderItems.menuItemId, barItemId));
       await db.delete(schema.orders).where(eq(schema.orders.shiftId, shiftId));

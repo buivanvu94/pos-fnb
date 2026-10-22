@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
+import { generateSafeTestPin, clearManagerPinHash } from "../helpers/test-pin-helper";
 import { signAuthToken, AUTH_COOKIE_NAME } from "@/server/auth/jwt";
 import { POST as approveShiftHandler } from "@/app/api/v1/shifts/approve/route";
 import { POST as closeShiftHandler } from "@/app/api/v1/shifts/close/route";
@@ -20,7 +21,7 @@ describe("Phase 09 Concurrency & Hardening Tests (Round 2)", () => {
   let cashierToken: string;
   let managerUserId: number;
   let managerToken: string;
-  const managerPin = "1234";
+  const managerPin = generateSafeTestPin();
 
   const rand = () => Math.random().toString(36).slice(2, 8);
 
@@ -45,6 +46,9 @@ describe("Phase 09 Concurrency & Hardening Tests (Round 2)", () => {
   });
 
   afterAll(async () => {
+    if (db) {
+      await clearManagerPinHash(db, managerUserId);
+    }
     await pool.end();
   });
 
@@ -71,6 +75,22 @@ describe("Phase 09 Concurrency & Hardening Tests (Round 2)", () => {
         version: 1,
       })
       .returning();
+
+    const [cat] = await db
+      .insert(schema.categories)
+      .values({ code: `CAT_${rand()}`, name: "Cat" })
+      .returning();
+    const [mItem] = await db
+      .insert(schema.menuItems)
+      .values({ code: `MI_${rand()}`, categoryId: cat.id, name: `Item ${rand()}`, price: 100_000 })
+      .returning();
+    await db.insert(schema.orderItems).values({
+      orderId: order.id,
+      menuItemId: mItem.id,
+      quantity: 1,
+      unitPrice: 100_000,
+      isCancelled: false,
+    });
 
     const runPay = () =>
       payOrderCash({

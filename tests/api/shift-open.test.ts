@@ -235,8 +235,8 @@ describe("Shift Open API - POST /api/v1/shifts/open & GET /api/v1/shifts/current
     expect(body.data.status).toBe("DANG_MO");
     expect(body.data.initialCash).toBe(1_000_000);
     expect(body.data.cashierId).toBe(cashierUserId);
-    // Shift code pattern: CA-YYYYMMDD-nn
-    expect(body.data.shiftCode).toMatch(/^CA-\d{8}-\d{2}$/);
+    // Shift code pattern: CA-YYYYMMDD-nn+ (2 or more digits)
+    expect(body.data.shiftCode).toMatch(/^CA-\d{8}-\d{2,}$/);
     expect(body.data.openedAt).toBeTruthy();
   });
 

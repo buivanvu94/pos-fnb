@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { auditLogs } from "@/db/schema";
 import type { DbOrTx } from "@/server/tables/table-service";
+import { recordSyncAuditEvent } from "@/server/sync";
 
 export interface LogAuditParams {
   userId?: number | null;
@@ -52,13 +53,33 @@ export async function logAudit(
     ? JSON.stringify(cleanMetadata)
     : null;
 
-  await runner.insert(auditLogs).values({
-    userId: params.userId ?? null,
-    action: params.action,
-    entityType: params.entityType,
-    entityId: entityIdStr,
-    reason: params.reason ? params.reason.slice(0, 255) : null,
-    metadata: metadataStr,
-    ipAddress: params.ipAddress ? params.ipAddress.slice(0, 50) : null,
-  });
+  const [inserted] = await runner
+    .insert(auditLogs)
+    .values({
+      userId: params.userId ?? null,
+      action: params.action,
+      entityType: params.entityType,
+      entityId: entityIdStr,
+      reason: params.reason ? params.reason.slice(0, 255) : null,
+      metadata: metadataStr,
+      ipAddress: params.ipAddress ? params.ipAddress.slice(0, 50) : null,
+    })
+    .returning();
+
+  if (inserted) {
+    await recordSyncAuditEvent(
+      {
+        id: inserted.id,
+        userId: inserted.userId,
+        action: inserted.action,
+        entityType: inserted.entityType,
+        entityId: inserted.entityId,
+        reason: inserted.reason,
+        metadata: cleanMetadata,
+        ipAddress: inserted.ipAddress,
+        createdAt: inserted.createdAt.toISOString(),
+      },
+      runner as any,
+    );
+  }
 }
