@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { Button, Row, Col, Typography, Space, App, Spin } from "antd";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { MenuGrid, MenuItemData, CategoryData } from "./menu-grid";
@@ -10,6 +9,7 @@ import { ItemCustomizerDrawer, ToppingOption } from "./item-customizer-drawer";
 import { TransferMergeModal } from "./transfer-merge-modal";
 import { useOrderActions } from "./use-order-actions";
 import { useOrderApprovalActions } from "./use-order-approval-actions";
+import { PaymentModal } from "@/components/payment/payment-modal";
 import { ManagerApprovalModal, DiscountModal, useManagerApproval } from "@/components/approval";
 import type { TableWithOrderInfo } from "@/server/tables/table-service";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
@@ -31,13 +31,13 @@ export function OrderingView({
   onBackToTables,
   onTableStatusChanged,
 }: OrderingViewProps) {
-  const router = useRouter();
   const { message } = App.useApp();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loadingOrder, setLoadingOrder] = useState(true);
   const [transferLoading, setTransferLoading] = useState(false);
   const [provisionalLoading, setProvisionalLoading] = useState(false);
   const [userRole, setUserRole] = useState<string>("PHUC_VU");
+  const [paymentOpen, setPaymentOpen] = useState(false);
 
   // Menu data
   const [menuItems, setMenuItems] = useState<MenuItemData[]>([]);
@@ -93,7 +93,7 @@ export function OrderingView({
 
     fetch("/api/v1/auth/me")
       .then((r) => r.json())
-      .then((d) => d.ok && d.data && setUserRole(d.data.role))
+      .then((d) => d.ok && d.user && setUserRole(d.user.role))
       .catch(() => {});
 
     fetch("/api/v1/menu/items").then((r) => r.json()).then((d) => d.ok && setMenuItems(d.data || [])).catch(() => {});
@@ -178,7 +178,14 @@ export function OrderingView({
 
   const handleNavigatePayment = () => {
     if (!order) return;
-    router.push(`/payment/${order.id}`);
+    setPaymentOpen(true);
+  };
+
+  // Đơn đã thanh toán: bàn được giải phóng, quay về sơ đồ bàn
+  const handlePaymentFinished = () => {
+    setPaymentOpen(false);
+    onTableStatusChanged();
+    onBackToTables();
   };
 
   return (
@@ -226,6 +233,16 @@ export function OrderingView({
           />
         </Col>
       </Row>
+
+      <PaymentModal
+        orderId={order?.id ?? null}
+        open={paymentOpen}
+        onClose={() => {
+          setPaymentOpen(false);
+          fetchOrder();
+        }}
+        onFinished={handlePaymentFinished}
+      />
 
       <ItemCustomizerDrawer
         open={customizerOpen}

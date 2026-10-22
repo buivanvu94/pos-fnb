@@ -1,20 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { App } from "antd";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 import type { MenuItemData } from "@/components/ordering/menu-grid";
 import { ERROR_CATALOG } from "@/lib/error-catalog";
 
 export function useCounterOrder() {
-  const router = useRouter();
   const { message } = App.useApp();
 
   const [activeOrder, setActiveOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [customizerOpen, setCustomizerOpen] = useState(false);
   const [customizingItem, setCustomizingItem] = useState<MenuItemData | null>(null);
+  const [paymentOpen, setPaymentOpen] = useState(false);
 
   const ensureActiveOrder = async (): Promise<OrderDetail | null> => {
     if (activeOrder && activeOrder.status === "DANG_PHUC_VU") {
@@ -164,7 +163,13 @@ export function useCounterOrder() {
       message.error(ERROR_CATALOG.ERR_08.message);
       return;
     }
-    router.push(`/payment/${activeOrder.id}`);
+    setPaymentOpen(true);
+  };
+
+  // Đơn đã thanh toán: làm mới giỏ cho khách kế tiếp
+  const handlePaymentFinished = () => {
+    setPaymentOpen(false);
+    setActiveOrder(null);
   };
 
   const handleClearCart = async () => {
@@ -201,5 +206,8 @@ export function useCounterOrder() {
     handleDeleteItem,
     handleCheckout,
     handleClearCart,
+    paymentOpen,
+    closePayment: () => setPaymentOpen(false),
+    handlePaymentFinished,
   };
 }

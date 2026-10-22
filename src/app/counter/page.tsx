@@ -10,6 +10,7 @@ import { ItemCustomizerDrawer } from "@/components/ordering/item-customizer-draw
 import { CounterCart } from "@/components/counter/counter-cart";
 import { ShiftInvoicesDrawer } from "@/components/counter/shift-invoices-drawer";
 import { useCounterMenu } from "@/components/counter/use-counter-menu";
+import { PaymentModal } from "@/components/payment/payment-modal";
 import { useCounterOrder } from "@/components/counter/use-counter-order";
 
 const { Title, Text } = Typography;
@@ -32,6 +33,9 @@ export default function CounterPage() {
     handleDeleteItem,
     handleCheckout,
     handleClearCart,
+    paymentOpen,
+    closePayment,
+    handlePaymentFinished,
   } = useCounterOrder();
 
   if (currentUser && currentUser.role === "PHUC_VU") {
@@ -85,6 +89,13 @@ export default function CounterPage() {
           />
         </Col>
       </Row>
+
+      <PaymentModal
+        orderId={activeOrder?.id ?? null}
+        open={paymentOpen}
+        onClose={closePayment}
+        onFinished={handlePaymentFinished}
+      />
 
       <ItemCustomizerDrawer
         open={customizerOpen}
