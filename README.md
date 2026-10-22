@@ -257,13 +257,13 @@ Hệ thống tích hợp thanh toán VietQR động chuẩn EMVCo và cổng Web
 
 ### 8.3 Webhook SePay & Đối soát tự động (AC-08-1, BR-11)
 - **Xác thực an toàn & Fail-closed**: API `POST /api/v1/webhooks/sepay` so sánh khóa bảo mật bằng giải thuật thời gian hằng số `crypto.timingSafeEqual` (băm SHA-256) chống rò rỉ độ dài token. Tự động từ chối (401) nếu chưa cấu hình secret trong biến môi trường.
-- **Tính Idempotent toàn diện**: Đảm bảo duy nhất qua chỉ mục `uniqueIndex` trên `unmatched_transactions(gateway_transaction_id)` và `payments(sepay_transaction_id)`. Hai webhook đồng thời cùng mã giao dịch chỉ hoàn tất 1 lần và đều phản hồi HTTP 200 `{ success: true }`.
+- **Tính Idempotent toàn diện**: Đảm bảo duy nhất qua chỉ mục `uniqueIndex` trên `unmatched_transactions(gateway_transaction_id)` và `payments(sepay_transaction_id)`. Hai webhook đồng thời cùng mã giao dịch chỉ hoàn tất 1 lần và đều phản hồi HTTP 200 `{ success: true }`, đảm bảo không ghi nhận sai lệch giả (`unmatched`) khi request chạy song song hoàn tất trước.
 - **Đối soát khớp**:
-  - Tự động bóc tách mã đơn hàng từ nội dung chuyển khoản (ưu tiên `HD\d{4,}` để tránh nhận nhầm chuỗi tên ngân hàng như `HDBANK`), chỉ khớp các đơn đang ở trạng thái `DANG_PHUC_VU` kèm giao dịch `PENDING` hoặc `EXPIRED`. Nếu phát hiện nhiều hơn 1 đơn hàng trùng mã sẽ chuyển sang ghi nhận đối soát thủ công.
+  - Tự động bóc tách mã đơn hàng từ nội dung chuyển khoản (chuẩn hóa tiền tố `HD` theo sau bởi tối thiểu 4 chữ số `HD\d{4,}` để tránh nhận nhầm chuỗi tên ngân hàng như `HDBANK`), chỉ khớp các đơn đang ở trạng thái `DANG_PHUC_VU` kèm giao dịch `PENDING` hoặc `EXPIRED`. Nếu phát hiện nhiều hơn 1 đơn hàng trùng mã sẽ chuyển sang ghi nhận đối soát thủ công.
   - Nếu khớp: Kiểm tra ca làm việc đang mở (`DANG_MO`), số tiền khớp chính xác (`transferAmount == finalAmount`), hoàn tất đơn hàng (`DA_THANH_TOAN`), cấp số thứ tự `queue_number`, kích mở két tiền `RJ12`, in hóa đơn và mở bàn.
   - Xử lý xung đột (Race condition): Nếu đơn hàng vừa được thu ngân thanh toán tiền mặt hoặc hủy ngay trước khi webhook tới, hệ thống tự động ghi nhận vào `unmatched_transactions` với lý do rõ ràng mà không làm mất vết tiền về.
 - **Xử lý sai lệch (Unmatched Transactions)**:
-  - Cả trường hợp thiếu tiền và thừa tiền (`transferAmount > finalAmount`), ca làm việc đã đóng, hoặc không tìm thấy đơn hàng đều được lưu trữ nguyên vẹn số tiền thực nhận vào bảng `unmatched_transactions`.
+  - Cả trường hợp thiếu tiền và thừa tiền (`transferAmount > finalAmount`), ca làm việc đã đóng, giao dịch không có nội dung chuyển khoản, hoặc không tìm thấy đơn hàng đều được lưu trữ nguyên vẹn số tiền thực nhận vào bảng `unmatched_transactions`.
   - Phản hồi HTTP 200 `{ success: true, unmatched: true }` giúp SePay xác nhận đã gửi webhook thành công và không thử lại liên tục.
 
 ### 8.4 Xác nhận thủ công dự phòng & Cờ tính năng

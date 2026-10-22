@@ -22,9 +22,9 @@ export async function POST(req: NextRequest) {
 
   // 2. Parse payload
   const rawBody = (await req.json().catch(() => null)) as SepayWebhookPayload | null;
-  if (!rawBody || (!rawBody.id && rawBody.id !== 0) || (!rawBody.content && !rawBody.description)) {
+  if (!rawBody || (!rawBody.id && rawBody.id !== 0)) {
     return NextResponse.json(
-      { success: false, error: "Dữ liệu webhook SePay không đúng định dạng" },
+      { success: false, error: "Dữ liệu webhook SePay không đúng định dạng (thiếu id)" },
       { status: 400 },
     );
   }

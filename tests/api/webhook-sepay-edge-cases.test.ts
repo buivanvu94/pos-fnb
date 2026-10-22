@@ -7,6 +7,7 @@ import * as schema from "@/db/schema";
 import { getTestDbUrl } from "../setup/test-config";
 import { POST as sepayWebhookHandler } from "@/app/api/v1/webhooks/sepay/route";
 import { setupSepayTestContext, createOrderWithPendingPayment, type SepayTestContext } from "./sepay-test-helper";
+import { extractOrderCodeFromContent } from "@/server/payments/vietqr-generator";
 
 describe("SePay Webhook Edge Cases & Reviewer Hardening", () => {
   const testDbUrl = getTestDbUrl();
@@ -85,6 +86,9 @@ describe("SePay Webhook Edge Cases & Reviewer Hardening", () => {
   it("handles concurrent duplicate webhooks with Promise.all: only 1 completes and both return success: true", async () => {
     const { order, compactCode } = await createOrderWithPendingPayment(ctx, `HD_${rand()}`, 90000);
     const txId = Math.floor(Math.random() * 900000) + 100000;
+    await db
+      .delete(schema.unmatchedTransactions)
+      .where(eq(schema.unmatchedTransactions.gatewayTransactionId, String(txId)));
 
     const makeReq = () =>
       new NextRequest("http://localhost:3000/api/v1/webhooks/sepay", {
@@ -104,6 +108,51 @@ describe("SePay Webhook Edge Cases & Reviewer Hardening", () => {
 
     const [dbOrder] = await db.select().from(schema.orders).where(eq(schema.orders.id, order.id));
     expect(dbOrder.status).toBe("DA_THANH_TOAN");
+
+    // Proves concurrent loser request does NOT log fake unmatched transaction
+    const unmatchedRecords = await db.select().from(schema.unmatchedTransactions).where(eq(schema.unmatchedTransactions.gatewayTransactionId, String(txId)));
+    expect(unmatchedRecords.length).toBe(0);
+  });
+
+  it("logs to unmatched and returns 200 success true when transfer arrives without content or description", async () => {
+    const txId = Math.floor(Math.random() * 900000) + 100000;
+    const req = new NextRequest("http://localhost:3000/api/v1/webhooks/sepay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Apikey ${TEST_SEPAY_API_KEY}` },
+      body: JSON.stringify({ id: txId, gateway: "VCB", transferType: "in", transferAmount: 50000, content: "" }),
+    });
+
+    const res = await sepayWebhookHandler(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.unmatched).toBe(true);
+    expect(json.error).toContain("Không tìm thấy mã hóa đơn");
+
+    const [unmatched] = await db.select().from(schema.unmatchedTransactions).where(eq(schema.unmatchedTransactions.gatewayTransactionId, String(txId)));
+    expect(unmatched).toBeDefined();
+    expect(unmatched.amount).toBe(50000);
+  });
+
+  it("synchronizes order code extraction regex requiring HD\\d{4,} and rejects shorter patterns", async () => {
+    expect(extractOrderCodeFromContent("CK HD12")).toBeNull();
+    expect(extractOrderCodeFromContent("CK HD123")).toBeNull();
+    expect(extractOrderCodeFromContent("CK HD0012")).toBe("HD0012");
+    expect(extractOrderCodeFromContent("Thanh toan HD-20261022-0012")).toBe("HD-20261022-0012");
+    expect(extractOrderCodeFromContent("Thanh toan qua HDBANK")).toBeNull();
+
+    const txId = Math.floor(Math.random() * 900000) + 100000;
+    const req = new NextRequest("http://localhost:3000/api/v1/webhooks/sepay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Apikey ${TEST_SEPAY_API_KEY}` },
+      body: JSON.stringify({ id: txId, transferType: "in", transferAmount: 70000, content: "CK HD12 noi dung" }),
+    });
+    const res = await sepayWebhookHandler(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.unmatched).toBe(true);
+    expect(json.error).toContain("Không tìm thấy mã hóa đơn");
   });
 
   it("logs to unmatched when shift of order has already closed (status != DANG_MO)", async () => {

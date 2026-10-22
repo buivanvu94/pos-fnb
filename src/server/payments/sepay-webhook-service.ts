@@ -99,6 +99,23 @@ export async function processSepayWebhook(payload: SepayWebhookPayload): Promise
   });
 
   if (!result.ok) {
+    // Check if a concurrent request with the same gateway transaction ID just completed successfully
+    const [concurrentSuccess] = await db
+      .select({ id: payments.id })
+      .from(payments)
+      .where(and(eq(payments.sepayTransactionId, gatewayTxId), eq(payments.status, "SUCCESS")))
+      .limit(1);
+
+    if (concurrentSuccess) {
+      return {
+        ok: true,
+        status: 200,
+        success: true,
+        message: "Giao dịch đã được xử lý bởi request đồng thời",
+        idempotent: true,
+      };
+    }
+
     // If order was already paid by cash, voided, or cancelled, log to unmatched
     const raceReason = `Thanh toán thất bại do xung đột (${result.error || "Đơn hàng đã thanh toán hoặc đã hủy"})`;
     await logUnmatchedTransaction({

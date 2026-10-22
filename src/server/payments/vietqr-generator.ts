@@ -51,8 +51,8 @@ export function extractOrderCodeFromContent(content: string): string | null {
     return fullMatch[1].toUpperCase();
   }
 
-  // 2. Compact code: HD followed by 2+ digits (e.g. HD0012, HD0001)
-  const compactDigitsMatch = content.match(/\b(HD\d{2,})\b/i);
+  // 2. Compact code: HD followed by 4+ digits (e.g. HD0012, HD0001 per README 8.3)
+  const compactDigitsMatch = content.match(/\b(HD\d{4,})\b/i);
   if (compactDigitsMatch) {
     return compactDigitsMatch[1].toUpperCase();
   }
@@ -63,8 +63,8 @@ export function extractOrderCodeFromContent(content: string): string | null {
     return hyphenOrUnderscoreMatch[1].toUpperCase();
   }
 
-  // 4. Any alphanumeric code starting with HD (excluding HDBANK / HDB)
-  const genericMatch = content.match(/\b(?!HDBANK\b)(?!HDB\b)(HD[A-Za-z0-9]{2,})\b/i);
+  // 4. Any alphanumeric code starting with HD (excluding HDBANK / HDB, min 4 chars after HD)
+  const genericMatch = content.match(/\b(?!HDBANK\b)(?!HDB\b)(HD[A-Za-z0-9]{4,})\b/i);
   if (genericMatch) {
     return genericMatch[1].toUpperCase();
   }
