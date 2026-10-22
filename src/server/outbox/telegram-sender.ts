@@ -54,6 +54,7 @@ export async function sendTelegramNotification(
         chat_id: chatId,
         text: messageText,
       }),
+      signal: AbortSignal.timeout(30000),
     });
 
     if (!response.ok) {
@@ -76,7 +77,15 @@ export async function sendTelegramNotification(
 
     return { ok: true };
   } catch (err: unknown) {
-    const rawError = err instanceof Error ? err.message : String(err);
+    const isTimeout =
+      (err as any)?.name === "TimeoutError" ||
+      (err as any)?.name === "AbortError" ||
+      String(err).toLowerCase().includes("timeout");
+    const rawError = isTimeout
+      ? "Telegram request timed out after 30s"
+      : err instanceof Error
+      ? err.message
+      : String(err);
     const cleanError = sanitizeError(`Network error: ${rawError}`, token);
     return { ok: false, error: cleanError };
   }

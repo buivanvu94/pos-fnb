@@ -125,11 +125,13 @@ export default function CloseShiftPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#f0f2f5", padding: "24px" }}>
       <div style={{ maxWidth: 800, margin: "0 auto" }}>
-        <Space style={{ marginBottom: 16 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => router.push("/tables")}>
-            Về bàn bán hàng
-          </Button>
-        </Space>
+        {shiftData.status === "DANG_MO" && (
+          <Space style={{ marginBottom: 16 }}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => router.push("/tables")}>
+              Về bàn bán hàng
+            </Button>
+          </Space>
+        )}
 
         <Card style={{ borderRadius: 8, boxShadow: "0 2px 10px rgba(0,0,0,0.06)" }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>

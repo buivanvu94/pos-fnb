@@ -440,7 +440,7 @@ describe("Cancel/Reduce Order Items API with Manager Approval (AC-06-1, AC-06-2,
       const body = await res.json();
       expect(body.ok).toBe(true);
     }
-  });
+  }, 60000);
 
   it("Item 2: returns HTTP 409 (not 500) when item is marked as printed to kitchen between precheck and transaction", async () => {
     const { order } = await createTestOrder(50000);

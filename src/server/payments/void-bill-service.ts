@@ -51,19 +51,11 @@ export async function voidPaidBill(params: VoidBillParams): Promise<VoidBillResu
   }
 
   if (order.status !== "DA_THANH_TOAN") {
-    return {
-      ok: false,
-      status: 409,
-      error: "Chỉ có thể hủy hóa đơn đã thanh toán hoàn tất",
-    };
+    return { ok: false, status: 409, error: "Chỉ có thể hủy hóa đơn đã thanh toán hoàn tất" };
   }
 
   if (order.version !== expectedVersion) {
-    return {
-      ok: false,
-      status: 409,
-      error: "Dữ liệu đơn hàng đã bị thay đổi bởi thao tác khác. Vui lòng tải lại!",
-    };
+    return { ok: false, status: 409, error: "Dữ liệu đơn hàng đã bị thay đổi bởi thao tác khác. Vui lòng tải lại!" };
   }
 
   // 2. Check if the order's shift is still open
@@ -81,11 +73,7 @@ export async function voidPaidBill(params: VoidBillParams): Promise<VoidBillResu
       .limit(1);
 
     if (shiftRow && shiftRow.status !== "DANG_MO") {
-      return {
-        ok: false,
-        status: 409,
-        error: "Không thể hủy hóa đơn vì ca làm việc của hóa đơn này đã đóng!",
-      };
+      return { ok: false, status: 409, error: "Không thể hủy hóa đơn vì ca làm việc của hóa đơn này đã đóng!" };
     }
   }
 
@@ -105,11 +93,7 @@ export async function voidPaidBill(params: VoidBillParams): Promise<VoidBillResu
   );
 
   if (!approval.ok) {
-    return {
-      ok: false,
-      status: approval.status,
-      error: approval.error,
-    };
+    return { ok: false, status: approval.status, error: approval.error };
   }
 
   const now = new Date();

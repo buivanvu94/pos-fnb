@@ -57,13 +57,19 @@ export default function OpenShiftPage() {
       .catch((err) => console.error("Failed to load user:", err))
       .finally(() => setLoadingUser(false));
 
-    // 2. Check if cashier already has an active open shift
+    // 2. Check if cashier already has an active open shift or pending approval shift
     fetch("/api/v1/shifts/current")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.ok && data?.data) {
-          message.info("Ca làm việc của bạn đang mở. Chuyển sang Sơ đồ bàn...");
-          router.replace("/tables");
+          const shift = data.data;
+          if (shift.status === "CHO_DUYET") {
+            message.info("Ca làm việc đang chờ Quản lý duyệt. Chuyển sang màn hình kết ca...");
+            router.replace("/close-shift");
+          } else {
+            message.info("Ca làm việc của bạn đang mở. Chuyển sang Sơ đồ bàn...");
+            router.replace("/tables");
+          }
         }
       })
       .catch(() => {});
@@ -87,8 +93,14 @@ export default function OpenShiftPage() {
       const data = await res.json();
       if (!res.ok || !data.ok) {
         if (res.status === 409) {
-          message.warning(data.error || "Ca làm việc đã mở. Chuyển sang Sơ đồ bàn...");
-          router.push("/tables");
+          const isPending = data?.error?.includes("chờ Quản lý duyệt");
+          if (isPending) {
+            message.warning(data.error || "Ca làm việc đang chờ duyệt. Chuyển sang màn hình kết ca...");
+            router.push("/close-shift");
+          } else {
+            message.warning(data.error || "Ca làm việc đã mở. Chuyển sang Sơ đồ bàn...");
+            router.push("/tables");
+          }
           return;
         }
         throw new Error(data?.error || "Không thể mở ca làm việc");
