@@ -269,6 +269,42 @@ describe("Order Items API - POST /api/v1/orders/:id/items", () => {
     expect(order.version).toBe(ord.version + 1);
   });
 
+  it("merges and increments quantity when adding the same item sequentially", async () => {
+    const [ord] = await db.select().from(schema.orders).where(eq(schema.orders.id, testOrderId));
+    const req1 = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/items`, {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: ord.version,
+        menuItemId: cfSuaItemId,
+        quantity: 1,
+      }),
+    });
+    const res1 = await modifyItemsHandler(req1, { params: Promise.resolve({ id: String(testOrderId) }) });
+    expect(res1.status).toBe(200);
+    const json1 = await res1.json();
+    const countBefore = json1.data.items.length;
+    const addedItem1 = json1.data.items.find((i: any) => i.menuItemId === cfSuaItemId && !i.isPrintedKitchen && i.toppings.length === 0);
+    const initialQty = addedItem1.quantity;
+
+    const req2 = new NextRequest(`http://localhost:3000/api/v1/orders/${testOrderId}/items`, {
+      method: "POST",
+      headers: { Cookie: `${AUTH_COOKIE_NAME}=${waiterToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expectedVersion: json1.data.version,
+        menuItemId: cfSuaItemId,
+        quantity: 2,
+      }),
+    });
+    const res2 = await modifyItemsHandler(req2, { params: Promise.resolve({ id: String(testOrderId) }) });
+    expect(res2.status).toBe(200);
+    const json2 = await res2.json();
+
+    expect(json2.data.items.length).toBe(countBefore);
+    const mergedItem = json2.data.items.find((i: any) => i.id === addedItem1.id);
+    expect(mergedItem.quantity).toBe(initialQty + 2);
+  });
+
   it("Item 6: checks HET_HANG when increasing quantity of existing item", async () => {
     const [ord] = await db.select().from(schema.orders).where(eq(schema.orders.id, testOrderId));
     const [targetItem] = await db.select().from(schema.orderItems).where(eq(schema.orderItems.orderId, testOrderId)).limit(1);

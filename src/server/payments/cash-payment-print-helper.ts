@@ -139,19 +139,35 @@ export async function enqueuePaymentPrintJobs(
 
 /**
  * Dispatches thermal print jobs after transaction commits without failing business request (BR-12, ERR-10).
+ * Dispatches in parallel using Promise.allSettled for optimal checkout response time.
  */
 export async function dispatchPaymentPrintJobs(jobIds: number[]) {
-  const failedJobs: number[] = [];
-  for (const jId of jobIds) {
-    if (!jId) continue;
-    try {
-      const res = await dispatchPrintJob(jId);
-      if (!res.ok || res.status === "FAILED") {
-        failedJobs.push(jId);
+  const validJobIds = jobIds.filter((id): id is number => Boolean(id) && id > 0);
+  if (validJobIds.length === 0) return undefined;
+
+  const results = await Promise.allSettled(
+    validJobIds.map(async (jId) => {
+      try {
+        const res = await dispatchPrintJob(jId);
+        if (!res.ok || res.status === "FAILED") {
+          return { ok: false, jobId: jId };
+        }
+        return { ok: true, jobId: jId };
+      } catch (printErr) {
+        console.error("Dispatch print error for job", jId, printErr);
+        return { ok: false, jobId: jId };
       }
-    } catch (printErr) {
-      console.error("Dispatch print error for job", jId, printErr);
-      failedJobs.push(jId);
+    }),
+  );
+
+  const failedJobs: number[] = [];
+  for (const outcome of results) {
+    if (outcome.status === "fulfilled") {
+      if (!outcome.value.ok) {
+        failedJobs.push(outcome.value.jobId);
+      }
+    } else {
+      failedJobs.push(-1);
     }
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Typography, Space, Tag, Alert, Spin, App, Button } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { MainLayout } from "@/components/main-layout";
@@ -13,12 +13,20 @@ const { Title, Text } = Typography;
 
 export default function TablesPage() {
   const { message } = App.useApp();
-  const { tables, loading, error, refresh } = useTablePolling(3000);
 
   // Active table in ordering mode
   const [selectedTable, setSelectedTable] = useState<TableWithOrderInfo | null>(null);
   const [activeOrderId, setActiveOrderId] = useState<number | null>(null);
   const [openingOrder, setOpeningOrder] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // Pause background table polling while actively taking orders in OrderingView
+  const isTableGridView = !selectedTable || !activeOrderId;
+  const { tables, loading, error, refresh } = useTablePolling(5000, isTableGridView);
 
   const handleSelectTable = async (table: TableWithOrderInfo) => {
     if (table.status === "TRONG") {
@@ -106,9 +114,12 @@ export default function TablesPage() {
             <Alert message={error} type="error" showIcon style={{ marginBottom: 16 }} />
           )}
 
-          {loading || openingOrder ? (
+          {!mounted || loading || openingOrder ? (
             <div style={{ textAlign: "center", padding: 80 }}>
-              <Spin size="large" tip={openingOrder ? "Đang mở đơn hàng cho bàn..." : "Đang tải dữ liệu bàn..."} />
+              <Spin size="large" />
+              <div style={{ marginTop: 16, color: "#8c8c8c" }}>
+                {openingOrder ? "Đang mở đơn hàng cho bàn..." : "Đang tải dữ liệu bàn..."}
+              </div>
             </div>
           ) : (
             <TableGrid

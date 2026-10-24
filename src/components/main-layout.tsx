@@ -155,7 +155,7 @@ export function MainLayout({ children }: MainLayoutProps) {
         </Space>
 
         <Space size="large">
-          <Tag color="cyan" style={{ fontSize: 13, padding: "4px 8px" }}>
+          <Tag color="cyan" suppressHydrationWarning style={{ fontSize: 13, padding: "4px 8px" }}>
             <ClockCircleOutlined /> {currentTime}
           </Tag>
 

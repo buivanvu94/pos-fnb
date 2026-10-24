@@ -56,6 +56,9 @@ export function usePaymentOrder(orderId: number) {
       if (data.ok) {
         message.success("Thanh toán tiền mặt thành công!");
         setPaymentSuccessData(data);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("pos:shift-updated"));
+        }
       } else {
         message.error(data.error || "Thanh toán thất bại");
       }

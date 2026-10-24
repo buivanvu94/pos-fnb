@@ -15,3 +15,12 @@ tmp/
 /backups/
 /playwright-report/
 /test-results/
+
+# Agent & AI cache
+.claude/
+.agent/
+.gemini/
+
+# Business Analysis / Internal docs
+ba/
+

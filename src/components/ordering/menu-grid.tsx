@@ -109,12 +109,14 @@ export function MenuGrid({
                     display: "flex",
                     flexDirection: "column",
                   }}
-                  bodyStyle={{
-                    padding: 12,
-                    display: "flex",
-                    flexDirection: "column",
-                    height: "100%",
-                    justifyContent: "space-between",
+                  styles={{
+                    body: {
+                      padding: 12,
+                      display: "flex",
+                      flexDirection: "column",
+                      height: "100%",
+                      justifyContent: "space-between",
+                    },
                   }}
                 >
                   <div>
@@ -139,7 +141,7 @@ export function MenuGrid({
                         size="small"
                         aria-label={`Tùy chỉnh ${item.name}`}
                         icon={<SettingOutlined />}
-                        disabled={isOutOfStock || loading}
+                        disabled={isOutOfStock}
                         onClick={(e) => {
                           e.stopPropagation();
                           onCustomizeItem(item);
@@ -150,7 +152,7 @@ export function MenuGrid({
                         size="small"
                         aria-label={`Thêm ${item.name}`}
                         icon={<PlusOutlined />}
-                        disabled={isOutOfStock || loading}
+                        disabled={isOutOfStock}
                         onClick={(e) => {
                           e.stopPropagation();
                           onQuickAddItem(item);

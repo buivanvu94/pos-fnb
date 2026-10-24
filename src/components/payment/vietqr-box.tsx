@@ -78,7 +78,8 @@ export function VietQrBox({
 
       {loading ? (
         <div style={{ textAlign: "center", padding: "60px 0" }}>
-          <Spin size="large" tip="Đang tạo mã VietQR..." />
+          <Spin size="large" />
+          <div style={{ marginTop: 16, color: "#8c8c8c" }}>Đang tạo mã VietQR...</div>
         </div>
       ) : (
         <Space direction="vertical" style={{ width: "100%", alignItems: "center" }} size={16}>

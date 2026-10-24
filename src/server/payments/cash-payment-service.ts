@@ -227,7 +227,20 @@ export async function payOrderCash(params: CashPaymentParams): Promise<CashPayme
     throw err;
   }
 
-  // Post-commit print dispatching
+  // Post-commit print dispatching: parallel background execution if ASYNC_PRINTING is enabled
+  if (process.env.ASYNC_PRINTING === "true" && process.env.NODE_ENV !== "test") {
+    setImmediate(() => {
+      dispatchPaymentPrintJobs(printJobsToDispatch).catch((err) =>
+        console.error("Background cash payment print error:", err),
+      );
+    });
+    return {
+      ok: true,
+      status: 200,
+      data: paymentResultData,
+    };
+  }
+
   const printWarning = await dispatchPaymentPrintJobs(printJobsToDispatch);
 
   return {

@@ -213,6 +213,19 @@ export async function executeVietQrPaymentCompletion(
   }
 
   // Post-commit print dispatching
+  if (process.env.ASYNC_PRINTING === "true" && process.env.NODE_ENV !== "test") {
+    setImmediate(() => {
+      dispatchPaymentPrintJobs(printJobsToDispatch).catch((err) =>
+        console.error("Async VietQR print error:", err)
+      );
+    });
+    return {
+      ok: true,
+      status: 200,
+      data: paymentResultData,
+    };
+  }
+
   const printWarning = await dispatchPaymentPrintJobs(printJobsToDispatch);
 
   return {

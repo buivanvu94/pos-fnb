@@ -124,50 +124,70 @@ export function CounterCart({
           </Popconfirm>
         )
       }
-      style={{ height: "100%", display: "flex", flexDirection: "column" }}
-      bodyStyle={{ flex: 1, display: "flex", flexDirection: "column", padding: "12px 16px" }}
+      style={{
+        borderRadius: 8,
+        display: "flex",
+        flexDirection: "column",
+        height: "calc(100vh - 120px)",
+        maxHeight: "calc(100vh - 120px)",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+        position: "sticky",
+        top: 80,
+      }}
+      styles={{ body: { flex: 1, display: "flex", flexDirection: "column", padding: "16px 16px 12px 16px", overflow: "hidden" } }}
     >
-      <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", marginBottom: 12 }}>
         <Table
           dataSource={items}
           columns={columns}
           rowKey="id"
           pagination={false}
           size="middle"
+          scroll={{ y: "calc(100vh - 380px)" }}
           locale={{ emptyText: "Giỏ hàng mang về đang trống. Chọn món để bắt đầu." }}
         />
       </div>
 
-      <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-          <Text>Tổng tiền:</Text>
-          <Text strong>{formatVnd(order?.totalAmount ?? 0)}</Text>
-        </div>
-        {(order?.discountAmount ?? 0) > 0 && (
+      <div style={{ flexShrink: 0, borderTop: "1px solid #f0f0f0", paddingTop: 12, marginTop: "auto" }}>
+        <div style={{ background: "#fafafa", padding: "10px 14px", borderRadius: 8, marginBottom: 12, border: "1px solid #f0f0f0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-            <Text type="danger">Giảm giá:</Text>
-            <Text strong type="danger">-{formatVnd(order?.discountAmount ?? 0)}</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>Tổng tiền hàng:</Text>
+            <Text strong style={{ fontSize: 14 }}>{formatVnd(order?.totalAmount ?? 0)}</Text>
           </div>
-        )}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
-          <Text style={{ fontSize: 16, fontWeight: 600 }}>Khách cần trả:</Text>
-          <Statistic
-            value={finalAmount}
-            formatter={(val) => formatVnd(Number(val))}
-            valueStyle={{ color: "#cf1322", fontWeight: 700, fontSize: 24 }}
-          />
+          {(order?.discountAmount ?? 0) > 0 && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <Text type="danger" style={{ fontSize: 13 }}>Giảm giá:</Text>
+              <Text strong type="danger" style={{ fontSize: 14 }}>-{formatVnd(order?.discountAmount ?? 0)}</Text>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4, borderTop: "1px dashed #e8e8e8", paddingTop: 6 }}>
+            <Text style={{ fontSize: 15, fontWeight: 700, color: "#262626" }}>Khách cần trả:</Text>
+            <Statistic
+              value={finalAmount}
+              formatter={(val) => formatVnd(Number(val))}
+              valueStyle={{ color: "#cf1322", fontWeight: 800, fontSize: 22, lineHeight: 1.2 }}
+            />
+          </div>
         </div>
 
         <Button
           type="primary"
           size="large"
           block
-          style={{ height: 48, fontSize: 16, backgroundColor: "#52c41a", borderColor: "#52c41a" }}
-          icon={<CreditCardOutlined />}
+          style={{
+            height: 48,
+            fontSize: 16,
+            fontWeight: 700,
+            backgroundColor: finalAmount > 0 ? "#52c41a" : undefined,
+            borderColor: finalAmount > 0 ? "#52c41a" : undefined,
+            boxShadow: finalAmount > 0 ? "0 4px 12px rgba(82, 196, 26, 0.3)" : undefined,
+          }}
+          icon={<CreditCardOutlined style={{ fontSize: 18 }} />}
           loading={loading}
+          disabled={!order || items.length === 0 || finalAmount <= 0}
           onClick={onCheckout}
         >
-          Thanh toán nhanh
+          Thanh toán nhanh ({formatVnd(finalAmount)})
         </Button>
       </div>
     </Card>

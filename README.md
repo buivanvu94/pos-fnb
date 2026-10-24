@@ -1,6 +1,24 @@
 # POS F&B (Quán Ăn, Cafe) — Next.js + Ant Design
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Next.js](https://img.shields.io/badge/Next.js-15_(App_Router)-black)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-blue)](https://react.dev/)
+[![Ant Design](https://img.shields.io/badge/Ant_Design-5.x-0170FE)](https://ant.design/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791)](https://www.postgresql.org/)
+
 Hệ thống POS bán hàng F&B chuyên nghiệp cho quán ăn, cafe chạy trên PC/màn hình cảm ứng 15-21", tối ưu hóa thao tác chạm, in nhiệt ESC/POS mạng LAN và đồng bộ đám mây outbox.
+
+---
+
+## 📸 Giao diện ứng dụng (Screenshots)
+
+> Giao diện tối ưu cho màn hình cảm ứng 15-21", thao tác nhanh giờ cao điểm, hiển thị trực quan trạng thái bàn và thực đơn.
+
+| Màn hình bán hàng / Gọi món | Sơ đồ bàn & Trạng thái |
+|:---:|:---:|
+| ![Màn hình bán hàng](docs/screenshots/01-ban-hang-pos.png) | ![Sơ đồ bàn](docs/screenshots/02-so-do-ban.png) |
+| **Thanh toán VietQR động** | **Quản lý ca & Bàn giao tiền mặt** |
+| ![Thanh toán VietQR](docs/screenshots/03-thanh-toan-vietqr.png) | ![Quản lý ca](docs/screenshots/04-quan-ly-ca.png) |
 
 ## 1. Công nghệ chính
 - **Frontend / Framework**: Next.js 15 (App Router) + TypeScript + React 19 + `@ant-design/v5-patch-for-react-19`
@@ -24,16 +42,30 @@ Hệ thống POS bán hàng F&B chuyên nghiệp cho quán ăn, cafe chạy trê
 ## 2. Thiết lập môi trường & Chạy dự án
 
 ### Yêu cầu tiên quyết
-- Node.js >= 18
-- Docker PostgreSQL chạy sẵn tại `127.0.0.1:15450` (container `pos-postgres`)
+- **Node.js** >= 18
+- **Docker & Docker Compose** (để khởi chạy PostgreSQL)
 
-### Cài đặt dependencies
+### Khởi động nhanh (Quickstart)
+
 ```bash
+# 1. Khởi động PostgreSQL container (chạy ngầm trên cổng 15450)
+docker compose up -d
+
+# 2. Cài đặt thư viện dependencies
 npm install
+
+# 3. Tạo file cấu hình môi trường
+cp .env.example .env
+
+# 4. Chạy migration và seed dữ liệu mẫu
+npm run db:migrate
+npm run db:seed
+
+# 5. Khởi chạy ứng dụng
+npm run dev
 ```
 
-### Biến môi trường
-Sao chép `.env.example` thành `.env` (file `.env` được gitignore):
+> **Mẹo trên Windows**: Bạn có thể click đúp chuột vào file [start.bat](file:///D:/DATA%20E/BUIVANVU/2026/phanmem/Opensource/POS/start.bat) để hệ thống tự động kiểm tra container, chạy migration và mở trình duyệt.
 ```bash
 cp .env.example .env
 ```
@@ -360,3 +392,10 @@ Hệ thống triển khai kiến trúc hàng đợi Outbox đồng bộ đám m�
 - **Sao lưu**: `scripts/backup-db.ps1` (pg_dump trong container, giữ 14 bản, không in mật khẩu).
 - **Chạy nhanh trên Windows**: `start.bat` (tạo `.env` nếu thiếu, bật Postgres, migrate, mở ứng dụng).
 - **Triển khai, biến môi trường, đặt lịch sao lưu, khôi phục, cổng sẵn sàng production**: xem [`docs/deployment-guide.md`](docs/deployment-guide.md).
+
+## 12. Giấy phép bản quyền (License)
+
+Dự án này được phân phối dưới giấy phép [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE). 
+
+Bất kỳ sửa đổi, bổ sung hoặc tái phân phối nào qua hạ tầng mạng đều phải giữ nguyên tính mã nguồn mở và chia sẻ lại cho cộng đồng theo cùng điều khoản giấy phép. Mọi đóng góp (Pull Request, Issue báo lỗi) từ cộng đồng đều được hoan nghênh!
+

@@ -51,7 +51,8 @@ export default function AdminSettingsPage() {
 
         {loading ? (
           <div style={{ textAlign: "center", padding: "80px 0" }}>
-            <Spin size="large" tip="Đang tải cấu hình..." />
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: "#8c8c8c" }}>Đang tải cấu hình...</div>
           </div>
         ) : forbidden ? (
           <Alert

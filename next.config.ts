@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  reactStrictMode: true,
+  reactStrictMode: false,
   serverExternalPackages: ["@napi-rs/canvas"],
+  experimental: {
+    optimizePackageImports: ["antd", "@ant-design/icons", "dayjs"],
+  },
   transpilePackages: [
     "antd",
     "@ant-design/icons",

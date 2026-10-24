@@ -9,10 +9,14 @@ export interface UseTablePollingResult {
 }
 
 /**
- * Custom polling hook to fetch real-time table status every 3 seconds.
- * Automatically halts polling when the browser tab is hidden to save battery and network bandwidth.
+ * Custom polling hook to fetch real-time table status.
+ * Automatically halts polling when the browser tab is hidden or when disabled (e.g. inside OrderingView)
+ * to save battery, CPU, and network bandwidth.
  */
-export function useTablePolling(intervalMs: number = 3000): UseTablePollingResult {
+export function useTablePolling(
+  intervalMs: number = 5000,
+  enabled: boolean = true,
+): UseTablePollingResult {
   const [tables, setTables] = useState<TableWithOrderInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,10 +47,16 @@ export function useTablePolling(intervalMs: number = 3000): UseTablePollingResul
   }, []);
 
   useEffect(() => {
-    // Initial fetch
-    fetchTables();
+    // Initial fetch if table list is empty
+    if (tables.length === 0) {
+      fetchTables();
+    }
 
-    // Setup 3s interval polling
+    if (!enabled) {
+      return;
+    }
+
+    // Setup interval polling only when enabled
     const timer = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         return; // Pause when tab is hidden
@@ -66,7 +76,7 @@ export function useTablePolling(intervalMs: number = 3000): UseTablePollingResul
       clearInterval(timer);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [fetchTables, intervalMs]);
+  }, [fetchTables, intervalMs, enabled, tables.length]);
 
   return {
     tables,

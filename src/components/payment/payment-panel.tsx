@@ -50,7 +50,8 @@ export function PaymentPanel({ orderId, embedded = false, onCancel, onPaid, onBa
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: "100px 0" }}>
-        <Spin size="large" tip="Đang tải hóa đơn..." />
+        <Spin size="large" />
+        <div style={{ marginTop: 16, color: "#8c8c8c" }}>Đang tải hóa đơn...</div>
       </div>
     );
   }

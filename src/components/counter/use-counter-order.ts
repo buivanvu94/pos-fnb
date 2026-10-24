@@ -170,6 +170,9 @@ export function useCounterOrder() {
   const handlePaymentFinished = () => {
     setPaymentOpen(false);
     setActiveOrder(null);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pos:shift-updated"));
+    }
   };
 
   const handleClearCart = async () => {
@@ -185,9 +188,15 @@ export function useCounterOrder() {
         }),
       });
       setActiveOrder(null);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pos:shift-updated"));
+    }
       message.success("Đã làm mới giỏ hàng mang về");
     } catch {
       setActiveOrder(null);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("pos:shift-updated"));
+    }
     } finally {
       setLoading(false);
     }

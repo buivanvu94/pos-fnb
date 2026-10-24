@@ -45,6 +45,25 @@ export function ShiftToolbar() {
 
   useEffect(() => {
     fetchCurrentShift();
+
+    const handleUpdate = () => {
+      fetchCurrentShift();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("pos:shift-updated", handleUpdate);
+      window.addEventListener("focus", handleUpdate);
+    }
+
+    const interval = setInterval(fetchCurrentShift, 10000);
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("pos:shift-updated", handleUpdate);
+        window.removeEventListener("focus", handleUpdate);
+      }
+      clearInterval(interval);
+    };
   }, [fetchCurrentShift]);
 
   const handleCashSuccess = (newExpectedCash: number) => {

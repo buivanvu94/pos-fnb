@@ -194,6 +194,29 @@ export async function sendKitchenOrder(
   }
 
   // Point 1: Dispatch simultaneously via Promise.allSettled with complete failure isolation (NFR-02)
+  if (process.env.ASYNC_PRINTING === "true" && process.env.NODE_ENV !== "test") {
+    setImmediate(async () => {
+      await Promise.allSettled(
+        createdJobIds.map(async (jId) => {
+          try {
+            await dispatchPrintJob(jId);
+          } catch (dispatchErr: any) {
+            console.error(`Unexpected error dispatching job ${jId}:`, dispatchErr);
+          }
+        })
+      );
+    });
+    return {
+      ok: true,
+      data: {
+        orderId,
+        orderCode: txResult.orderCode,
+        sentAt: txResult.sentAt,
+        items: txResult.items,
+      },
+    };
+  }
+
   const failedJobs: Array<{ id: number; error: string }> = [];
 
   const dispatchPromises = createdJobIds.map(async (jId) => {

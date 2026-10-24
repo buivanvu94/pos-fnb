@@ -63,8 +63,9 @@ export async function modifyOrderItems(
           }, tx);
         }
       } else {
-        const itemsToProcess = input.items && input.items.length > 0
-          ? input.items
+        const isBatch = Boolean(input.items && input.items.length > 0);
+        const itemsToProcess = isBatch
+          ? input.items!
           : input.orderItemId !== undefined || input.menuItemId !== undefined
             ? [{ id: input.orderItemId, menuItemId: input.menuItemId, quantity: input.quantity ?? 1, notes: input.notes, toppingIds: input.toppingIds ?? [] }]
             : [];
@@ -113,21 +114,67 @@ export async function modifyOrderItems(
             if (!menuItem) throw new TxAbortError("Món không tồn tại", 404);
             if (menuItem.status === "HET_HANG") throw new TxAbortError(formatErr07(menuItem.name), 400);
 
-            const uniqueToppingIds = Array.from(new Set(item.toppingIds ?? []));
-            let toppingRecords: Array<{ id: number; name: string; price: number; isAvailable: boolean }> = [];
-            if (uniqueToppingIds.length > 0) {
-              toppingRecords = await tx.select().from(toppings).where(inArray(toppings.id, uniqueToppingIds));
-              if (toppingRecords.length !== uniqueToppingIds.length) throw new TxAbortError("Topping không tồn tại trên hệ thống", 400);
-              if (toppingRecords.some((t) => !t.isAvailable)) throw new TxAbortError("Topping hiện không còn hoạt động", 400);
+            const uniqueToppingIds = Array.from(new Set(item.toppingIds ?? [])).sort((a, b) => a - b);
+            const normalizedNotes = item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null;
+            const quantityToAdd = item.quantity > 0 ? item.quantity : 1;
+
+            const existingUnprinted = await tx.select().from(orderItems)
+              .where(and(
+                eq(orderItems.orderId, orderId),
+                eq(orderItems.menuItemId, menuItem.id),
+                eq(orderItems.isPrintedKitchen, false),
+                eq(orderItems.isCancelled, false),
+              ));
+
+            let matchedId: number | null = null;
+            if (!isBatch) {
+              for (const cand of existingUnprinted) {
+              const candNotes = cand.notes && cand.notes.trim() !== "" ? cand.notes.trim() : null;
+              if (candNotes !== normalizedNotes) continue;
+
+              const candToppings = await tx.select({ toppingId: orderItemToppings.toppingId })
+                .from(orderItemToppings)
+                .where(eq(orderItemToppings.orderItemId, cand.id));
+              const candToppingIds = candToppings.map((t) => t.toppingId).sort((a, b) => a - b);
+
+              if (
+                candToppingIds.length === uniqueToppingIds.length &&
+                candToppingIds.every((id, idx) => id === uniqueToppingIds[idx])
+              ) {
+                matchedId = cand.id;
+                await tx.update(orderItems)
+                  .set({ quantity: cand.quantity + quantityToAdd })
+                  .where(eq(orderItems.id, cand.id));
+                break;
+              }
+            }
             }
 
-            const [newItem] = await tx.insert(orderItems).values({
-              orderId, menuItemId: menuItem.id, quantity: item.quantity > 0 ? item.quantity : 1, unitPrice: menuItem.price,
-              notes: item.notes && item.notes.trim() !== "" ? item.notes.trim().slice(0, 100) : null, isPrintedKitchen: false,
-            }).returning();
+            if (!matchedId) {
+              let toppingRecords: Array<{ id: number; name: string; price: number; isAvailable: boolean }> = [];
+              if (uniqueToppingIds.length > 0) {
+                toppingRecords = await tx.select().from(toppings).where(inArray(toppings.id, uniqueToppingIds));
+                if (toppingRecords.length !== uniqueToppingIds.length) throw new TxAbortError("Topping không tồn tại trên hệ thống", 400);
+                if (toppingRecords.some((t) => !t.isAvailable)) throw new TxAbortError("Topping hiện không còn hoạt động", 400);
+              }
 
-            for (const t of toppingRecords) {
-              await tx.insert(orderItemToppings).values({ orderItemId: newItem.id, toppingId: t.id, toppingName: t.name, toppingPrice: t.price });
+              const [newItem] = await tx.insert(orderItems).values({
+                orderId,
+                menuItemId: menuItem.id,
+                quantity: quantityToAdd,
+                unitPrice: menuItem.price,
+                notes: normalizedNotes,
+                isPrintedKitchen: false,
+              }).returning();
+
+              for (const t of toppingRecords) {
+                await tx.insert(orderItemToppings).values({
+                  orderItemId: newItem.id,
+                  toppingId: t.id,
+                  toppingName: t.name,
+                  toppingPrice: t.price,
+                });
+              }
             }
           }
         }

@@ -9,6 +9,7 @@ import { ItemCustomizerDrawer, ToppingOption } from "./item-customizer-drawer";
 import { TransferMergeModal } from "./transfer-merge-modal";
 import { useOrderActions } from "./use-order-actions";
 import { useOrderApprovalActions } from "./use-order-approval-actions";
+import { useMenuCache } from "@/components/menu/use-menu-cache";
 import { PaymentModal } from "@/components/payment/payment-modal";
 import { ManagerApprovalModal, DiscountModal, useManagerApproval } from "@/components/approval";
 import type { TableWithOrderInfo } from "@/server/tables/table-service";
@@ -39,10 +40,8 @@ export function OrderingView({
   const [userRole, setUserRole] = useState<string>("PHUC_VU");
   const [paymentOpen, setPaymentOpen] = useState(false);
 
-  // Menu data
-  const [menuItems, setMenuItems] = useState<MenuItemData[]>([]);
-  const [categories, setCategories] = useState<CategoryData[]>([]);
-  const [toppings, setToppings] = useState<ToppingOption[]>([]);
+  // Menu data from shared memory cache
+  const { items: menuItems, categories, toppings } = useMenuCache();
 
   // Drawers & Modals
   const [customizerOpen, setCustomizerOpen] = useState(false);
@@ -95,10 +94,6 @@ export function OrderingView({
       .then((r) => r.json())
       .then((d) => d.ok && d.user && setUserRole(d.user.role))
       .catch(() => {});
-
-    fetch("/api/v1/menu/items").then((r) => r.json()).then((d) => d.ok && setMenuItems(d.data || [])).catch(() => {});
-    fetch("/api/v1/menu/categories").then((r) => r.json()).then((d) => d.ok && setCategories(d.data || [])).catch(() => {});
-    fetch("/api/v1/menu/toppings").then((r) => r.json()).then((d) => d.ok && setToppings(d.data || [])).catch(() => {});
   }, [fetchOrder]);
 
   const handleCancelKitchenItemClick = (item: OrderItemDetail) => {

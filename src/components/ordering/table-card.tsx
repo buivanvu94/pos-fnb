@@ -72,7 +72,7 @@ export function TableCard({ table, isSelected, onClick }: TableCardProps) {
           cursor: "pointer",
           transition: "all 0.2s ease",
         }}
-        bodyStyle={{ padding: "16px 12px 12px 12px" }}
+        styles={{ body: { padding: "16px 12px 12px 12px" } }}
       >
         <Space direction="vertical" size={4} style={{ width: "100%" }}>
           <Title level={5} style={{ margin: 0 }}>

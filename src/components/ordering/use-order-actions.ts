@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { App, Button } from "antd";
 import type { OrderDetail, OrderItemDetail } from "@/server/orders/order-service";
 import type { MenuItemData } from "./menu-grid";
@@ -13,28 +13,49 @@ export function useOrderActions(
   const [actionLoading, setActionLoading] = useState(false);
   const [sendingKitchen, setSendingKitchen] = useState(false);
 
+  const requestQueue = useRef<Promise<any>>(Promise.resolve());
+  const latestOrderRef = useRef<OrderDetail | null>(order);
+
+  useEffect(() => {
+    latestOrderRef.current = order;
+  }, [order]);
+
   const postItems = useCallback(
-    async (payload: any) => {
-      const res = await fetch(`/api/v1/orders/${order!.id}/items`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedVersion: order!.version, ...payload }),
-      });
-      return { status: res.status, data: await res.json() };
+    (payload: any) => {
+      const task = async () => {
+        const currentOrder = latestOrderRef.current;
+        if (!currentOrder) {
+          return { status: 400, data: { ok: false, error: "Không tìm thấy đơn hàng" } };
+        }
+
+        const res = await fetch(`/api/v1/orders/${currentOrder.id}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expectedVersion: currentOrder.version, ...payload }),
+        });
+        const data = await res.json();
+        if (data.ok && data.data) {
+          latestOrderRef.current = data.data;
+          setOrder(data.data);
+        }
+        return { status: res.status, data };
+      };
+
+      const queuedPromise = requestQueue.current.then(task, task);
+      requestQueue.current = queuedPromise;
+      return queuedPromise;
     },
-    [order],
+    [setOrder],
   );
 
   const quickAdd = useCallback(
     async (item: MenuItemData) => {
-      if (!order) return;
+      if (!latestOrderRef.current) return;
       setActionLoading(true);
       try {
         const { status, data } = await postItems({ menuItemId: item.id, quantity: 1 });
         if (data.ok && data.data) {
-          setOrder(data.data);
           message.success(`Đã thêm ${item.name}`);
-          onTableStatusChanged();
         } else {
           message.error(data.error || "Không thể thêm món");
           if (status === 409) await fetchOrder();
@@ -45,12 +66,12 @@ export function useOrderActions(
         setActionLoading(false);
       }
     },
-    [order, postItems, setOrder, fetchOrder, onTableStatusChanged, message],
+    [postItems, fetchOrder, message],
   );
 
   const addCustomized = useCallback(
     async (customData: { menuItemId: number; quantity: number; notes: string; toppingIds: number[] }) => {
-      if (!order) return false;
+      if (!latestOrderRef.current) return false;
       setActionLoading(true);
       try {
         const { status, data } = await postItems({
@@ -60,9 +81,7 @@ export function useOrderActions(
           toppingIds: customData.toppingIds,
         });
         if (data.ok && data.data) {
-          setOrder(data.data);
           message.success("Đã thêm món với tùy chọn");
-          onTableStatusChanged();
           return true;
         } else {
           message.error(data.error || "Không thể thêm món");
@@ -76,12 +95,12 @@ export function useOrderActions(
         setActionLoading(false);
       }
     },
-    [order, postItems, setOrder, fetchOrder, onTableStatusChanged, message],
+    [postItems, fetchOrder, message],
   );
 
   const changeQuantity = useCallback(
     async (item: OrderItemDetail, newQty: number) => {
-      if (!order) return;
+      if (!latestOrderRef.current) return;
       setActionLoading(true);
       try {
         const { status, data } = await postItems({
@@ -90,10 +109,7 @@ export function useOrderActions(
           menuItemId: item.menuItemId,
           quantity: newQty,
         });
-        if (data.ok && data.data) {
-          setOrder(data.data);
-          onTableStatusChanged();
-        } else {
+        if (!data.ok) {
           message.error(data.error || "Không thể cập nhật số lượng");
           if (status === 409) await fetchOrder();
         }
@@ -103,19 +119,17 @@ export function useOrderActions(
         setActionLoading(false);
       }
     },
-    [order, postItems, setOrder, fetchOrder, onTableStatusChanged, message],
+    [postItems, fetchOrder, message],
   );
 
   const deleteItem = useCallback(
     async (item: OrderItemDetail) => {
-      if (!order) return;
+      if (!latestOrderRef.current) return;
       setActionLoading(true);
       try {
         const { status, data } = await postItems({ action: "delete", orderItemId: item.id });
-        if (data.ok && data.data) {
-          setOrder(data.data);
+        if (data.ok) {
           message.success(`Đã xóa ${item.menuItemName}`);
-          onTableStatusChanged();
         } else {
           message.error(data.error || "Không thể xóa món");
           if (status === 409) await fetchOrder();
@@ -126,17 +140,18 @@ export function useOrderActions(
         setActionLoading(false);
       }
     },
-    [order, postItems, setOrder, fetchOrder, onTableStatusChanged, message],
+    [postItems, fetchOrder, message],
   );
 
   const sendKitchen = useCallback(async () => {
-    if (!order) return;
+    const currentOrder = latestOrderRef.current;
+    if (!currentOrder) return;
     setSendingKitchen(true);
     try {
-      const res = await fetch(`/api/v1/orders/${order.id}/send-kitchen`, {
+      const res = await fetch(`/api/v1/orders/${currentOrder.id}/send-kitchen`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedVersion: order.version }),
+        body: JSON.stringify({ expectedVersion: currentOrder.version }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -183,16 +198,17 @@ export function useOrderActions(
     } finally {
       setSendingKitchen(false);
     }
-  }, [order, fetchOrder, onTableStatusChanged, message, notification]);
+  }, [fetchOrder, onTableStatusChanged, message, notification]);
 
   const cancelEmptyOrder = useCallback(async () => {
-    if (!order) return false;
+    const currentOrder = latestOrderRef.current;
+    if (!currentOrder) return false;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/orders/${order.id}`, {
+      const res = await fetch(`/api/v1/orders/${currentOrder.id}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedVersion: order.version }),
+        body: JSON.stringify({ expectedVersion: currentOrder.version }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -210,7 +226,7 @@ export function useOrderActions(
     } finally {
       setActionLoading(false);
     }
-  }, [order, fetchOrder, onTableStatusChanged, message]);
+  }, [fetchOrder, onTableStatusChanged, message]);
 
   return {
     actionLoading,
